@@ -199,6 +199,7 @@ pub fn generate(width: u32, height: u32, cell_size: u32) {
         .unwrap()
         .dyn_into()
         .unwrap();
+    context.reset();
     context.put_image_data(&image_data_temp, 0.0, 0.0).unwrap();
 }
 
