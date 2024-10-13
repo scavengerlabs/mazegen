@@ -41,6 +41,14 @@ struct Maze {
     cell_size: u32,
 }
 
+#[derive(Eq)]
+#[derive(Hash)]
+#[derive(PartialEq)]
+struct Point {
+    x: u32,
+    y: u32,
+}
+
 impl Maze {
     pub fn new(width: u32, height: u32, cell_size: u32) -> Maze {
         let image = MyImage::new(width * (cell_size + 1) + 1, height * (cell_size + 1) + 1, 4);
@@ -80,27 +88,27 @@ impl Maze {
         }
     }
 
-    fn set_wall_white(&mut self, first: &(u32, u32), second: &(u32, u32)) {
+    fn set_wall_white(&mut self, first: &Point, second: &Point) {
         for u in 0..self.cell_size {
-            if second.0 > first.0 {
+            if second.x > first.x {
                 self.image.set_white(
-                    self.cell_size + first.0 * (self.cell_size + 1) + 1,
-                    u + first.1 * (self.cell_size + 1) + 1,
+                    self.cell_size + first.x * (self.cell_size + 1) + 1,
+                    u + first.y * (self.cell_size + 1) + 1,
                 );
-            } else if first.0 > second.0 {
+            } else if first.x > second.x {
                 self.image.set_white(
-                    self.cell_size + second.0 * (self.cell_size + 1) + 1,
-                    u + second.1 * (self.cell_size + 1) + 1,
+                    self.cell_size + second.x * (self.cell_size + 1) + 1,
+                    u + second.y * (self.cell_size + 1) + 1,
                 );
-            } else if second.1 > first.1 {
+            } else if second.y > first.y {
                 self.image.set_white(
-                    u + first.0 * (self.cell_size + 1) + 1,
-                    self.cell_size + first.1 * (self.cell_size + 1) + 1,
+                    u + first.x * (self.cell_size + 1) + 1,
+                    self.cell_size + first.y * (self.cell_size + 1) + 1,
                 );
-            } else if first.1 > second.1 {
+            } else if first.y > second.y {
                 self.image.set_white(
-                    u + second.0 * (self.cell_size + 1) + 1,
-                    self.cell_size + second.1 * (self.cell_size + 1) + 1,
+                    u + second.x * (self.cell_size + 1) + 1,
+                    self.cell_size + second.y * (self.cell_size + 1) + 1,
                 );
             }
         }
@@ -120,13 +128,13 @@ pub fn generate(width: u32, height: u32, cell_size: u32) {
         for y in 0..height {
             // add vertical edges
             if y < height - 1 {
-                graph.insert((y, x), (y + 1, x));
-                graph.insert((y + 1, x), (y, x));
+                graph.insert(Point{y:y, x:x}, Point{y:y + 1, x:x});
+                graph.insert(Point{y:y + 1, x:x}, Point{y:y, x:x});
             }
             // add horizontal edges
             if x < width - 1 {
-                graph.insert((y, x), (y, x + 1));
-                graph.insert((y, x + 1), (y, x));
+                graph.insert(Point{y:y, x:x}, Point{y:y, x:x + 1});
+                graph.insert(Point{y:y, x:x + 1}, Point{y:y, x:x});
             }
         }
     }
@@ -203,7 +211,7 @@ pub fn generate(width: u32, height: u32, cell_size: u32) {
     context.put_image_data(&image_data_temp, 0.0, 0.0).unwrap();
 }
 
-fn erase_loops(path: Vec<&(u32, u32)>) -> Vec<&(u32, u32)> {
+fn erase_loops(path: Vec<&Point>) -> Vec<&Point> {
     let mut indices = Vec::new();
     let mut idx = 0;
     indices.push(idx);
