@@ -1,6 +1,9 @@
-use multimap::MultiMap;
 use rand::seq::SliceRandom;
+use rand::Rng;
+use std::collections::HashMap;
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
+use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::Clamped;
 use wasm_bindgen::JsCast;
@@ -13,24 +16,64 @@ struct MyImage {
     channels: u32,
 }
 
+struct Color {
+    r: u8,
+    g: u8,
+    b: u8,
+}
+
 impl MyImage {
-    pub fn new(width: u32, height: u32, channels: u32) -> MyImage {
+    pub fn new(width: u32, height: u32, channels: u32, color: &Color) -> MyImage {
         let mut image = MyImage {
-            pixels: vec![0; (width * height * 4) as usize],
+            pixels: vec![255; (width * height * 4) as usize],
             width,
             height,
             channels,
         };
-        for idx in (channels - 1..width * height * channels).step_by(channels as usize) {
-            image.pixels[idx as usize] = 255;
+
+        for u in 0..image.width {
+            for v in 0..image.height {
+                image.set_px(u, v, color);
+            }
         }
         return image;
     }
 
-    pub fn set_white(&mut self, u: u32, v: u32) {
-        self.pixels[(self.width * self.channels * v + self.channels * u + 0) as usize] = 255;
-        self.pixels[(self.width * self.channels * v + self.channels * u + 1) as usize] = 255;
-        self.pixels[(self.width * self.channels * v + self.channels * u + 2) as usize] = 255;
+    pub fn set_px(&mut self, u: u32, v: u32, color: &Color) {
+        if u >= self.width || v >= self.height {
+            return;
+        }
+        self.pixels[(self.width * self.channels * v + self.channels * u + 0) as usize] = color.r;
+        self.pixels[(self.width * self.channels * v + self.channels * u + 1) as usize] = color.g;
+        self.pixels[(self.width * self.channels * v + self.channels * u + 2) as usize] = color.b;
+    }
+
+    pub fn plot_line_segment(&mut self, first: &Point, second: &Point, color: &Color) {
+        let x1 = first.x;
+        let x2 = second.x;
+        let y1 = first.y;
+        let y2 = second.y;
+        let dx = x2 - x1;
+        let dy = y2 - y1;
+        if dx.abs() > dy.abs() {
+            let u1 = x1.round() as u32;
+            let u2 = x2.round() as u32;
+            let u_min = std::cmp::min(u1, u2);
+            let u_max = std::cmp::max(u1, u2);
+            for u in u_min..u_max {
+                let v = ((y2 - y1) / (x2 - x1) * (u as f32 - x1) + y1).round() as u32;
+                self.set_px(u, v, color);
+            }
+        } else {
+            let v1 = y1.round() as u32;
+            let v2 = y2.round() as u32;
+            let v_min = std::cmp::min(v1, v2);
+            let v_max = std::cmp::max(v1, v2);
+            for v in v_min..v_max {
+                let u = ((x2 - x1) / (y2 - y1) * (v as f32 - y1) + x1).round() as u32;
+                self.set_px(u, v, color);
+            }
+        }
     }
 }
 
@@ -41,77 +84,97 @@ struct Maze {
     cell_size: u32,
 }
 
-#[derive(Eq)]
-#[derive(Hash)]
-#[derive(PartialEq)]
 struct Point {
-    x: u32,
-    y: u32,
+    id: Uuid,
+    x: f32,
+    y: f32,
+}
+
+impl Hash for Point {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl PartialEq for Point {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+impl Eq for Point {}
+
+impl Point {
+    pub fn new(x: f32, y: f32) -> Point {
+        return Point {
+            id: Uuid::new_v4(),
+            x: x,
+            y: y,
+        };
+    }
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+struct Pixel {
+    u: u32,
+    v: u32,
+}
+
+impl Point {
+    pub fn nearest_pixel(&self) -> Pixel {
+        return Pixel {
+            u: self.x.round() as u32,
+            v: self.y.round() as u32,
+        };
+    }
 }
 
 impl Maze {
     pub fn new(width: u32, height: u32, cell_size: u32) -> Maze {
-        let image = MyImage::new(width * (cell_size + 1) + 1, height * (cell_size + 1) + 1, 4);
+        let mut image = MyImage::new(
+            width * (cell_size + 1) + 1,
+            height * (cell_size + 1) + 1,
+            4,
+            &Color { r: 0, g: 0, b: 0 },
+        );
 
-        let mut maze = Maze {
+        let points = vec![
+            Point::new(0.0, 0.0),
+            Point::new((width * (cell_size + 1)) as f32, 0.0),
+            Point::new(
+                (width * (cell_size + 1)) as f32,
+                (height * (cell_size + 1)) as f32,
+            ),
+            Point::new(0.0, (height * (cell_size + 1)) as f32),
+            Point::new(0.0, 0.0),
+        ];
+        let polyline = PolyLine { points: points };
+        polyline.plot(&mut image, &Color { r: 255, g: 0, b: 0 });
+
+        let maze = Maze {
             image,
             width,
             height,
             cell_size,
         };
-        for x in 0..width {
-            for y in 0..height {
-                maze.set_cell_white(x, y);
-            }
-        }
         return maze;
     }
 
-    fn set_cell_white(&mut self, x: u32, y: u32) {
-        for u in 0..self.cell_size {
-            for v in 0..self.cell_size {
-                self.image.set_white(
-                    u + x * (self.cell_size + 1) + 1,
-                    v + y * (self.cell_size + 1) + 1,
-                );
-            }
-        }
-    }
-
-    fn set_openings_white(&mut self) {
-        for u in 0..self.cell_size {
-            self.image.set_white(u + 1, 0);
-            self.image.set_white(
-                (self.width - 1) * (self.cell_size + 1) + u + 1,
-                self.height * (self.cell_size + 1),
-            );
-        }
-    }
-
-    fn set_wall_white(&mut self, first: &Point, second: &Point) {
-        for u in 0..self.cell_size {
-            if second.x > first.x {
-                self.image.set_white(
-                    self.cell_size + first.x * (self.cell_size + 1) + 1,
-                    u + first.y * (self.cell_size + 1) + 1,
-                );
-            } else if first.x > second.x {
-                self.image.set_white(
-                    self.cell_size + second.x * (self.cell_size + 1) + 1,
-                    u + second.y * (self.cell_size + 1) + 1,
-                );
-            } else if second.y > first.y {
-                self.image.set_white(
-                    u + first.x * (self.cell_size + 1) + 1,
-                    self.cell_size + first.y * (self.cell_size + 1) + 1,
-                );
-            } else if first.y > second.y {
-                self.image.set_white(
-                    u + second.x * (self.cell_size + 1) + 1,
-                    self.cell_size + second.y * (self.cell_size + 1) + 1,
-                );
-            }
-        }
+    fn plot_divider(&mut self, first: &Point, second: &Point) {
+        let mu = (first.x + second.x + 1.0) / 2.0 * (self.cell_size + 1) as f32;
+        let mv = (first.y + second.y + 1.0) / 2.0 * (self.cell_size + 1) as f32;
+        let dv = (first.x - second.x) * (self.cell_size + 1) as f32;
+        let du = (first.y - second.y) * (self.cell_size + 1) as f32;
+        let pt0 = Point::new(mu + (du / 2.0 - 0.5), mv + (dv / 2.0 - 0.5));
+        let pt1 = Point::new(mu - (du / 2.0 - 0.5), mv - (dv / 2.0 - 0.5));
+        self.image.plot_line_segment(
+            &pt0,
+            &pt1,
+            &Color {
+                r: 255,
+                g: 0,
+                b: 255,
+            },
+        );
     }
 
     pub fn get_image(&self) -> &MyImage {
@@ -123,23 +186,47 @@ impl Maze {
 pub fn generate(width: u32, height: u32, cell_size: u32) {
     let mut maze = Maze::new(width, height, cell_size);
 
-    let mut graph = MultiMap::new();
-    for x in 0..width {
-        for y in 0..height {
-            // add vertical edges
-            if y < height - 1 {
-                graph.insert(Point{y:y, x:x}, Point{y:y + 1, x:x});
-                graph.insert(Point{y:y + 1, x:x}, Point{y:y, x:x});
-            }
-            // add horizontal edges
-            if x < width - 1 {
-                graph.insert(Point{y:y, x:x}, Point{y:y, x:x + 1});
-                graph.insert(Point{y:y, x:x + 1}, Point{y:y, x:x});
+    let mut rng = rand::thread_rng();
+
+    let mut graph = HashMap::new();
+    let mut centers = HashMap::new();
+    for u in 0..width {
+        for v in 0..height {
+            let pt = Point::new(
+                u as f32 + rng.gen::<f32>() / 5.0,
+                v as f32 + rng.gen::<f32>() / 5.0,
+            );
+            centers.insert(pt.id, pt);
+        }
+    }
+    let mut center_iter = centers.values();
+    while let Some(px0) = center_iter.next() {
+        let mut center_iter2 = center_iter.clone();
+        while let Some(px1) = center_iter2.next() {
+            if ((px0.x as i32) - (px1.x as i32)).abs() == 1 && (px0.y as i32) - (px1.y as i32) == 0
+            {
+                graph
+                    .entry(px0.id)
+                    .or_insert(HashSet::new())
+                    .insert(&px1.id);
+                graph
+                    .entry(px1.id)
+                    .or_insert(HashSet::new())
+                    .insert(&px0.id);
+            } else if ((px0.y as i32) - (px1.y as i32)).abs() == 1
+                && (px0.x as i32) - (px1.x as i32) == 0
+            {
+                graph
+                    .entry(px0.id)
+                    .or_insert(HashSet::new())
+                    .insert(&px1.id);
+                graph
+                    .entry(px1.id)
+                    .or_insert(HashSet::new())
+                    .insert(&px0.id);
             }
         }
     }
-
-    let mut rng = rand::thread_rng();
 
     let mut unchosen_vertices = HashSet::new();
     for vertex in graph.keys() {
@@ -153,6 +240,7 @@ pub fn generate(width: u32, height: u32, cell_size: u32) {
     chosen_vertices.insert(*chosen);
     unchosen_vertices.remove(chosen);
 
+    let mut connections = HashSet::new();
     loop {
         // random walk (with loop erasure) from new point until we hit something in chosen_vertices
         let mut path = Vec::new();
@@ -162,19 +250,24 @@ pub fn generate(width: u32, height: u32, cell_size: u32) {
         path.push(*start);
         loop {
             let start = path.last().expect("should not be empty...");
-            let candidates = graph.get_vec(start).expect("key should really exist...");
+            let candidates = graph
+                .get(start)
+                .expect("key should really exist...")
+                .clone()
+                .into_iter()
+                .collect::<Vec<_>>();
             let next = candidates
                 .choose(&mut rng)
                 .expect("there should really be one...");
             path.push(next);
-            if chosen_vertices.contains(&next) {
+            if chosen_vertices.contains(next) {
                 break;
             }
         }
         path = erase_loops(path);
 
         for idx in 0..path.len() - 1 {
-            maze.set_wall_white(path[idx], path[idx + 1]);
+            connections.insert((path[idx], path[idx + 1]));
         }
         for vertex in &path {
             unchosen_vertices.remove(vertex);
@@ -184,16 +277,31 @@ pub fn generate(width: u32, height: u32, cell_size: u32) {
             break;
         }
     }
+    for (source, destinations) in graph.iter() {
+        for destination in destinations {
+            if connections.contains(&(source, destination))
+                || connections.contains(&(destination, source))
+            {
+                continue;
+            }
+            maze.plot_divider(
+                centers.get(source).expect("this should really be here..."),
+                centers
+                    .get(destination)
+                    .expect("this should really be here..."),
+            );
+        }
+    }
 
-    maze.set_openings_white();
+    let image = maze.get_image();
+    render_to_canvas(image);
+}
 
-    let array = &maze.get_image().pixels.clone();
-    let image_data_temp: ImageData = ImageData::new_with_u8_clamped_array_and_sh(
-        Clamped(&array),
-        maze.get_image().width,
-        maze.get_image().height,
-    )
-    .unwrap();
+fn render_to_canvas(image: &MyImage) {
+    let array = image.pixels.clone();
+    let image_data_temp: ImageData =
+        ImageData::new_with_u8_clamped_array_and_sh(Clamped(&array), image.width, image.height)
+            .unwrap();
 
     let document = web_sys::window().unwrap().document().unwrap();
     let canvas: HtmlCanvasElement = document
@@ -211,7 +319,7 @@ pub fn generate(width: u32, height: u32, cell_size: u32) {
     context.put_image_data(&image_data_temp, 0.0, 0.0).unwrap();
 }
 
-fn erase_loops(path: Vec<&Point>) -> Vec<&Point> {
+fn erase_loops<T: std::cmp::PartialEq>(path: Vec<&T>) -> Vec<&T> {
     let mut indices = Vec::new();
     let mut idx = 0;
     indices.push(idx);
@@ -229,4 +337,18 @@ fn erase_loops(path: Vec<&Point>) -> Vec<&Point> {
         loop_erased_path.push(path[idx]);
     }
     return loop_erased_path;
+}
+
+struct PolyLine {
+    points: Vec<Point>,
+}
+
+impl PolyLine {
+    pub fn plot(&self, image: &mut MyImage, color: &Color) {
+        let mut origin = &self.points[0];
+        for destination in &self.points[1..self.points.len()] {
+            image.plot_line_segment(origin, destination, color);
+            origin = destination;
+        }
+    }
 }

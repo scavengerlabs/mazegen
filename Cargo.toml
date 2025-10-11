@@ -17,3 +17,11 @@ wasm-bindgen = "0.2"
 [dependencies.web-sys]
 features = ['CanvasRenderingContext2d', 'Document', 'Element', 'HtmlCanvasElement', 'Window', 'ImageData']
 version = "0.3.70"
+
+[dependencies.uuid]
+version = "1.18.1"
+# Lets you generate random UUIDs
+features = [
+    "v4",
+    "js",
+]
