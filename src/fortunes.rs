@@ -2,9 +2,8 @@ use rand::Rng;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
-use std::iter::Map;
+use std::fmt;
 use std::ops::Neg;
-use std::ptr;
 
 // binary tree with ids for arcs and edges, per Fortune's algorithm
 // map from arc id to adjacent edges
@@ -16,6 +15,12 @@ use std::ptr;
 pub struct Point {
     x: f32,
     y: f32,
+}
+
+impl fmt::Display for Point {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "({:.2}, {:.2})", self.x, self.y)
+    }
 }
 
 // impl Ord for Point {
@@ -43,12 +48,31 @@ impl Point {
         // compute Euclidean distance between points
         return ((self.x - other.x).powf(2.0) + (self.y - other.y).powf(2.0)).sqrt();
     }
+
+    pub fn perpendicular(&self, other: &Point) -> Direction {
+        // get the direction perpendicular to the line connecting two points,
+        // pointed downward
+        // TODO: point right?
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        if dy >= 0.0 {
+            return Direction::new(dx, -dy);
+        } else {
+            return Direction::new(-dx, dy);
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
 struct Direction {
     x: f32,
     y: f32,
+}
+
+impl fmt::Display for Direction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "[{:.2}, {:.2}]", self.x, self.y)
+    }
 }
 
 impl Direction {
@@ -82,6 +106,12 @@ impl Neg for Direction {
 struct Ray {
     start: Point,
     direction: Direction,
+}
+
+impl fmt::Display for Ray {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}-{}->", self.start, self.direction)
+    }
 }
 
 impl Ray {
@@ -209,7 +239,7 @@ impl Parabola {
             a.distance_from(&ray.start)
                 .total_cmp(&b.distance_from(&ray.start))
         });
-        return Some(valid_options[0].clone());
+        return Some(valid_options[0]);
     }
 
     pub fn tangent_at(&self, point: &Point) -> Direction {
@@ -231,49 +261,135 @@ impl Parabola {
 
 #[derive(Debug)]
 struct Slot {
+    id: u32,
     value: Node,
+    lower_neighbor: Option<u32>,
+    upper_neighbor: Option<u32>,
 }
 
-pub enum LowerNeighborOption<T> {
-    Below(T),
-    Above,
-    None,
+// pub enum LowerNeighborOption<T> {
+//     Below(T),
+//     Above,
+//     None,
+// }
+
+pub fn generate_id() -> u32 {
+    return rand::rng().random();
 }
 
 impl Slot {
+    pub fn seq_str(&self, beachline: &Beachline) -> String {
+        let upper_str = match self.upper_neighbor {
+            Some(upper_neighbor_id) => {
+                "-".to_owned() + &beachline.nodes[&upper_neighbor_id].seq_str_up(beachline)
+            }
+            None => "".to_string(),
+        };
+        return format!("root {}(u{:?}) ", self.id, self.upper_neighbor)
+            + &self.seq_str_down(beachline)
+            + &upper_str;
+    }
+    pub fn seq_str_down(&self, beachline: &Beachline) -> String {
+        match self.lower_neighbor {
+            Some(lower_neighbor_id) => {
+                let lower_neighbor = &beachline.nodes[&lower_neighbor_id];
+                return format!(
+                    "{}-{}",
+                    lower_neighbor.seq_str_down(beachline),
+                    format!("{}(l{:?})", self.id, self.lower_neighbor)
+                );
+            }
+            None => {
+                return format!("{}", format!("{}(l{:?})", self.id, self.lower_neighbor));
+            }
+        }
+    }
+    pub fn seq_str_up(&self, beachline: &Beachline) -> String {
+        match self.upper_neighbor {
+            Some(upper_neighbor_id) => {
+                if upper_neighbor_id == self.id {
+                    panic!("This is bad.")
+                }
+                let upper_neighbor = &beachline.nodes[&upper_neighbor_id];
+                return format!(
+                    "{}-{}",
+                    format!("{}(u{:?})", self.id, self.upper_neighbor),
+                    upper_neighbor.seq_str_up(beachline)
+                );
+            }
+            None => {
+                return format!("{}", format!("{}(u{:?})", self.id, self.upper_neighbor));
+            }
+        }
+    }
+    pub fn str(&self, beachline: &Beachline, prefix: String) -> String {
+        match self.value {
+            Node::Arc(arc) => {
+                return format!("arc({}) {}", self.id, arc.focus);
+            }
+            Node::Edge(edge) => {
+                let first = format!(
+                    "edge({}l{}){} ─┬─ {}",
+                    self.id,
+                    edge.lower_child,
+                    ":",
+                    // format!(" {}", edge.ray),
+                    beachline.nodes[&edge.upper_child]
+                        .str(beachline, prefix.clone() + "       │  "),
+                );
+                let second = format!(
+                    "       └─ {}",
+                    beachline.nodes[&edge.lower_child]
+                        .str(beachline, prefix.clone() + "          "),
+                );
+                return first + "\n" + &prefix + &second;
+            }
+        }
+    }
+
+    pub fn builder() -> SlotBuilder {
+        return SlotBuilder::new();
+    }
+
     pub fn from_arc(arc: Arc) -> Self {
         return Self {
+            id: generate_id(),
             value: Node::Arc(arc),
+            lower_neighbor: None,
+            upper_neighbor: None,
         };
     }
 
     pub fn from_edge(edge: Edge) -> Self {
         return Self {
+            id: generate_id(),
             value: Node::Edge(edge),
+            lower_neighbor: None,
+            upper_neighbor: None,
         };
     }
 
     pub fn is_leaf(&self) -> bool {
         match self.value {
-            Node::Edge(_) => true,
+            Node::Arc(_) => true,
             _ => false,
         }
     }
 
-    pub fn get_slot_at(&mut self, site: &Point) -> &mut Slot {
-        if self.is_leaf() {
-            return self;
-        }
-        if let Node::Edge(edge) = &mut self.value {
-            let directrix = site.x;
-            if edge.get_endpoint_y(directrix) < site.y {
-                return edge.lower_child.get_slot_at(site);
-            } else {
-                return edge.upper_child.get_slot_at(site);
-            }
-        }
-        panic!("You shouldn't reach here.")
-    }
+    // pub fn get_slot_at(&mut self, site: &Point) -> &mut Slot {
+    //     if self.is_leaf() {
+    //         return self;
+    //     }
+    //     if let Node::Edge(edge) = &mut self.value {
+    //         let directrix = site.x;
+    //         if edge.get_endpoint_y(directrix) < site.y {
+    //             return edge.lower_child.get_slot_at(site);
+    //         } else {
+    //             return edge.upper_child.get_slot_at(site);
+    //         }
+    //     }
+    //     panic!("You shouldn't reach here.")
+    // }
 
     // pub fn get_nearest_edge_below<'a, 'b>(
     //     &'a mut self,
@@ -324,49 +440,96 @@ impl Slot {
     // }
 }
 
-#[derive(Debug)]
+struct SlotBuilder {
+    id: u32,
+    value: Option<Node>,
+    lower_neighbor: Option<u32>,
+    upper_neighbor: Option<u32>,
+}
+
+impl SlotBuilder {
+    pub fn new() -> Self {
+        return SlotBuilder {
+            id: generate_id(),
+            value: None,
+            lower_neighbor: None,
+            upper_neighbor: None,
+        };
+    }
+
+    pub fn build(&self) -> Slot {
+        let value = self.value.unwrap();
+        return Slot {
+            id: self.id,
+            value: value,
+            lower_neighbor: self.lower_neighbor,
+            upper_neighbor: self.upper_neighbor,
+        };
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
 enum Node {
     Arc(Arc),
     Edge(Edge),
 }
 
-impl Node {}
+impl Node {
+    pub fn get_arc(self) -> Option<Arc> {
+        return match self {
+            Node::Arc(arc) => Some(arc),
+            Node::Edge(_) => None,
+        };
+    }
 
-#[derive(Debug)]
+    pub fn get_edge(self) -> Option<Edge> {
+        return match self {
+            Node::Edge(edge) => Some(edge),
+            Node::Arc(_) => None,
+        };
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
 struct Edge {
     ray: Ray,
-    lower_child: Box<Slot>,
-    upper_child: Box<Slot>,
+    lower_child: u32,
+    upper_child: u32,
+    parent: Option<u32>,
 }
 
 impl Edge {
-    pub fn get_lower_arc(&self) -> &Arc {
-        match &self.lower_child.value {
-            Node::Edge(edge) => &edge.get_lower_arc(),
-            Node::Arc(arc) => arc,
-        }
-    }
-    pub fn get_upper_arc(&self) -> &Arc {
-        match &self.upper_child.value {
-            Node::Edge(edge) => &edge.get_upper_arc(),
-            Node::Arc(arc) => arc,
-        }
-    }
+    // pub fn get_lower_arc(&self) -> &Arc {
+    //     match &self.lower_child.value {
+    //         Node::Edge(edge) => &edge.get_lower_arc(),
+    //         Node::Arc(arc) => arc,
+    //     }
+    // }
+    // pub fn get_upper_arc(&self) -> &Arc {
+    //     match &self.upper_child.value {
+    //         Node::Edge(edge) => &edge.get_upper_arc(),
+    //         Node::Arc(arc) => arc,
+    //     }
+    // }
 
-    pub fn get_endpoint_y(&self, directrix: f32) -> f32 {
-        let lower_arc = self.get_lower_arc();
-        return lower_arc.intersection(&self.ray, directrix).unwrap().y;
-    }
+    // pub fn get_endpoint_y(&self, directrix: f32) -> f32 {
+    //     let lower_arc = self.get_lower_arc();
+    //     return lower_arc.intersection(&self.ray, directrix).unwrap().y;
+    // }
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 struct Arc {
     focus: Point,
+    parent: Option<u32>,
 }
 
 impl Arc {
-    pub fn new(focus: Point) -> Self {
-        return Arc { focus: focus };
+    pub fn new(focus: Point, parent: Option<u32>) -> Self {
+        return Arc {
+            focus: focus,
+            parent: parent,
+        };
     }
 
     pub fn intersection(&self, ray: &Ray, directrix: f32) -> Option<Point> {
@@ -380,73 +543,312 @@ impl Arc {
 
 #[derive(Debug)]
 struct Beachline {
-    root: Option<Box<Slot>>,
+    root: Option<u32>,
+    nodes: HashMap<u32, Slot>,
+}
+
+impl fmt::Display for Beachline {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.root {
+            Some(root_node_id) => {
+                let root_slot = &self.nodes[&root_node_id];
+                write!(
+                    f,
+                    "\n{}\n{}",
+                    root_slot.str(self, "".to_string()),
+                    root_slot.seq_str(&self),
+                )
+            }
+            None => {
+                write!(f, "empty Beachline")
+            }
+        }
+    }
 }
 
 impl Beachline {
     pub fn new() -> Self {
-        return Beachline { root: None };
+        return Beachline {
+            root: None,
+            nodes: HashMap::new(),
+        };
     }
 
-    pub fn get_slot_at(&mut self, site: &Point) -> &mut Slot {
-        match &mut self.root {
-            Some(slot) => {
-                return slot.get_slot_at(site);
-            }
-            None => {
-                panic!("Don't call get_arc_at() of an empty Beachline.")
-            }
-        }
-    }
-
-    // pub fn get_lower_edge(&mut self, site: &Site) -> &mut Slot {}
+    // pub fn get_slot_at(&mut self, site: &Point) -> &mut Slot {
+    //     match &self.root {
+    //         Some(node_idx) => {
+    //             let slot = &mut self.nodes[*node_idx];
+    //             return slot.get_slot_at(site);
+    //         }
+    //         None => {
+    //             panic!("Don't call get_arc_at() of an empty Beachline.")
+    //         }
+    //     }
+    // }
 
     // each edge corresponds to a y value where two arcs collide
 
-    pub fn add_site(&mut self, site: &Site) {
-        let target_slot = self.get_slot_at(&site.location);
-        let target_arc = match &target_slot.value {
-            Node::Arc(arc) => arc,
-            Node::Edge(_) => panic!("don't"),
+    pub fn remove_arc(&mut self, target_arc_slot_id: u32) {
+        let target_arc_slot = &self.nodes[&target_arc_slot_id];
+        // for a circle event, edges should exist on both sides
+        let lower_edge_slot = &self.nodes[&target_arc_slot.lower_neighbor.unwrap()];
+        let upper_edge_slot = &self.nodes[&target_arc_slot.upper_neighbor.unwrap()];
+        let lower_edge_slot_id = lower_edge_slot.id;
+        let upper_edge_slot_id = upper_edge_slot.id;
+        let lower_arc_slot = &self.nodes[&lower_edge_slot.lower_neighbor.unwrap()];
+        let upper_arc_slot = &self.nodes[&upper_edge_slot.upper_neighbor.unwrap()];
+        let lower_arc_slot_id = lower_arc_slot.id;
+        let upper_arc_slot_id = upper_arc_slot.id;
+        let lower_site = lower_arc_slot.value.get_arc().unwrap().focus;
+        let upper_site = upper_arc_slot.value.get_arc().unwrap().focus;
+        let lower_edge = &lower_edge_slot.value.get_edge().unwrap();
+        let upper_edge = &upper_edge_slot.value.get_edge().unwrap();
+        let new_start = lower_edge.ray.intersection(upper_edge.ray).unwrap();
+        let new_ray = Ray {
+            start: new_start,
+            direction: lower_site.perpendicular(&upper_site),
         };
-        let bottom_arc = Arc::new(target_arc.focus);
-        let new_arc = Arc::new(site.location);
-        let top_arc = Arc::new(target_arc.focus);
-        let site_to_arc_ray_start = target_arc
-            .intersection(
-                &Ray {
-                    start: site.location.clone(),
-                    direction: Direction::new(-1.0, 0.0),
-                },
-                site.location.x,
-            )
-            .unwrap();
+        // adjust binary tree
+        if lower_edge.upper_child == target_arc_slot_id {
+            // connect lower_edge.lower_child to lower_edge.parent
+            // this cuts out lower_edge and its upper_child (AKA target_arc)
+            let parent_slot = self.nodes.get_mut(&lower_edge.parent.unwrap()).unwrap(); // TODO: what if lower_edge has no parent?
+            let mut parent_edge = parent_slot.value.get_edge().unwrap();
+            let new_child_slot_id = lower_edge.lower_child;
+            if parent_edge.lower_child == lower_edge_slot_id {
+                parent_edge.lower_child = new_child_slot_id;
+                // parent_slot.lower_neighbor = Some(lower_arc_slot_id);
+            } else if parent_edge.upper_child == lower_edge_slot_id {
+                parent_edge.upper_child = new_child_slot_id;
+                // parent_slot.upper_neighbor = Some(upper_arc_slot_id);
+            }
+            // // reassign edge to slot (in case we copied somewhere)
+            parent_slot.value = Node::Edge(parent_edge);
+            match self.nodes.get_mut(&new_child_slot_id).unwrap().value {
+                Node::Arc(mut new_child_mut) => {
+                    new_child_mut.parent = upper_edge.parent;
+                }
+                Node::Edge(mut new_child_mut) => {
+                    new_child_mut.parent = upper_edge.parent;
+                }
+            }
+            // fetch upper_edge anew because we've modified self.nodes
+            let target_arc_slot = &self.nodes[&target_arc_slot_id];
+            let upper_edge_slot = &self.nodes[&target_arc_slot.upper_neighbor.unwrap()];
+            let upper_edge = &upper_edge_slot.value.get_edge().unwrap();
+            // create a new_edge between arcs lower_neighbor.lower_neighbor and upper_neighbor.upper_neighbor
+            let new_edge = Edge {
+                ray: new_ray,
+                lower_child: upper_edge.lower_child,
+                upper_child: upper_edge.upper_child,
+                parent: upper_edge.parent,
+            };
+            // replace upper_edge with new_edge
+            let upper_edge_slot_mut = self.nodes.get_mut(&upper_edge_slot_id).unwrap();
+            upper_edge_slot_mut.value = Node::Edge(new_edge);
+            // fix neighbors
+            upper_edge_slot_mut.upper_neighbor = Some(upper_arc_slot_id);
+            upper_edge_slot_mut.lower_neighbor = Some(lower_arc_slot_id);
+            let lower_arc_slot_mut = self.nodes.get_mut(&lower_arc_slot_id).unwrap();
+            lower_arc_slot_mut.upper_neighbor = Some(upper_edge_slot_id);
+            let upper_arc_slot_mut = self.nodes.get_mut(&upper_arc_slot_id).unwrap();
+            upper_arc_slot_mut.lower_neighbor = Some(upper_edge_slot_id);
+        } else if upper_edge.lower_child == target_arc_slot_id {
+            // connect upper_edge.upper_child to upper_edge.parent
+            // this cuts out upper_edge and its lower_child
+            let parent_slot = self.nodes.get_mut(&upper_edge.parent.unwrap()).unwrap(); // TODO: what if upper_edge has no parent?
+            let mut parent_edge = parent_slot.value.get_edge().unwrap();
+            let new_child_slot_id = upper_edge.upper_child;
+            if parent_edge.lower_child == upper_edge_slot_id {
+                parent_edge.lower_child = new_child_slot_id;
+                // parent_slot.lower_neighbor = Some(lower_arc_slot_id);
+            } else if parent_edge.upper_child == upper_edge_slot_id {
+                parent_edge.upper_child = new_child_slot_id;
+                // parent_slot.upper_neighbor = Some(upper_arc_slot_id);
+            } else {
+                panic!("This should not be.")
+            }
+            // reassign edge to slot (in case we copied somewhere)
+            parent_slot.value = Node::Edge(parent_edge);
+            match self.nodes.get_mut(&new_child_slot_id).unwrap().value {
+                Node::Arc(mut new_child_mut) => {
+                    new_child_mut.parent = upper_edge.parent;
+                }
+                Node::Edge(mut new_child_mut) => {
+                    new_child_mut.parent = upper_edge.parent;
+                }
+            }
+            // fetch lower_edge anew because we've modified self.nodes
+            let target_arc_slot = &self.nodes[&target_arc_slot_id];
+            let lower_edge_slot = &self.nodes[&target_arc_slot.lower_neighbor.unwrap()];
+            let lower_edge = &lower_edge_slot.value.get_edge().unwrap();
+            // create a new_edge between arcs lower_neighbor.lower_neighbor and upper_neighbor.upper_neighbor
+            let new_edge = Edge {
+                ray: new_ray,
+                lower_child: lower_edge.lower_child,
+                upper_child: lower_edge.upper_child,
+                parent: lower_edge.parent,
+            };
+            // replace lower_edge with new_edge
+            let lower_edge_slot_mut = self.nodes.get_mut(&lower_edge_slot_id).unwrap();
+            lower_edge_slot_mut.value = Node::Edge(new_edge);
+            // fix neighbors
+            lower_edge_slot_mut.upper_neighbor = Some(upper_arc_slot_id);
+            lower_edge_slot_mut.lower_neighbor = Some(lower_arc_slot_id);
+            let lower_arc_slot_mut = self.nodes.get_mut(&lower_arc_slot_id).unwrap();
+            lower_arc_slot_mut.upper_neighbor = Some(lower_edge_slot_id);
+            let upper_arc_slot_mut = self.nodes.get_mut(&upper_arc_slot_id).unwrap();
+            upper_arc_slot_mut.lower_neighbor = Some(lower_edge_slot_id);
+        }
+    }
+
+    pub fn add_site(&mut self, site: &Site) {
+        if self.root.is_none() {
+            let mut new_arc_slot_builder = Slot::builder();
+            let new_arc = Arc::new(site.location, None);
+            new_arc_slot_builder.value = Some(Node::Arc(new_arc));
+            let new_arc_slot = new_arc_slot_builder.build();
+            self.root = Some(new_arc_slot.id);
+            self.nodes.insert(new_arc_slot.id, new_arc_slot);
+            return;
+        }
+        // get arc and slot that will be replaced with new subtree
+        let target_slot_id = self.get_slot_id_at(&self.nodes[&self.root.unwrap()], &site.location);
+        let target_slot = self.nodes.get_mut(&target_slot_id).unwrap();
+        let target_arc = target_slot.value.get_arc().unwrap();
+
+        // geometry
+        let ray = Ray {
+            start: site.location,
+            direction: Direction::new(-1.0, 0.0),
+        };
+        // println!("target_arc: {:?}", target_arc);
+        // println!("ray: {:?}", ray);
+        let site_to_arc_ray_start = target_arc.intersection(&ray, site.location.x).unwrap();
         let parabola = target_arc.get_parabola(site.location.x);
         let up_tangent = parabola.tangent_at(&site_to_arc_ray_start);
-        let down_tangent = -(up_tangent.clone());
-        let down_ray = Ray {
-            start: site_to_arc_ray_start.clone(),
-            direction: down_tangent,
-        };
+        let down_tangent = -up_tangent;
         let up_ray = Ray {
             start: site_to_arc_ray_start,
             direction: up_tangent,
         };
-        let bottom_edge = Edge {
-            ray: down_ray.clone(),
-            lower_child: Box::new(Slot::from_arc(new_arc)),
-            upper_child: Box::new(Slot::from_arc(bottom_arc)),
+        let down_ray = Ray {
+            start: site_to_arc_ray_start,
+            direction: down_tangent,
         };
+
+        // create all slot builders; assigns IDs
+        let mut bottom_arc_slot_builder = Slot::builder();
+        let mut new_arc_slot_builder = Slot::builder();
+        let mut top_arc_slot_builder = Slot::builder();
+        let mut bottom_edge_slot_builder = Slot::builder();
+        let mut top_edge_slot_builder = Slot::builder();
+
+        // create new arcs
+        let bottom_arc = Arc::new(target_arc.focus, Some(bottom_edge_slot_builder.id));
+        bottom_arc_slot_builder.value = Some(Node::Arc(bottom_arc));
+        let new_arc = Arc::new(site.location, Some(bottom_edge_slot_builder.id));
+        new_arc_slot_builder.value = Some(Node::Arc(new_arc));
+        let top_arc = Arc::new(target_arc.focus, Some(top_edge_slot_builder.id));
+        top_arc_slot_builder.value = Some(Node::Arc(top_arc));
+
+        // create new edges
+        let bottom_edge = Edge {
+            ray: down_ray,
+            lower_child: bottom_arc_slot_builder.id,
+            upper_child: new_arc_slot_builder.id,
+            parent: Some(top_edge_slot_builder.id),
+        };
+        bottom_edge_slot_builder.value = Some(Node::Edge(bottom_edge));
         let top_edge = Edge {
             ray: up_ray,
-            lower_child: Box::new(Slot::from_arc(top_arc)),
-            upper_child: Box::new(Slot::from_edge(bottom_edge)),
+            lower_child: bottom_edge_slot_builder.id,
+            upper_child: top_arc_slot_builder.id,
+            parent: target_arc.parent,
         };
+
+        let target_slot_upper_neighbor_id = target_slot.upper_neighbor;
+        let target_slot_lower_neighbor_id = target_slot.lower_neighbor;
+        // assign neighbors
+        top_arc_slot_builder.upper_neighbor = target_slot_upper_neighbor_id;
+        top_arc_slot_builder.lower_neighbor = Some(target_slot_id);
+        // target slot becomes "top edge"
+        target_slot.upper_neighbor = Some(top_arc_slot_builder.id);
+        target_slot.lower_neighbor = Some(new_arc_slot_builder.id);
+        new_arc_slot_builder.upper_neighbor = Some(target_slot_id);
+        new_arc_slot_builder.lower_neighbor = Some(bottom_edge_slot_builder.id);
+        bottom_edge_slot_builder.upper_neighbor = Some(new_arc_slot_builder.id);
+        bottom_edge_slot_builder.lower_neighbor = Some(bottom_arc_slot_builder.id);
+        bottom_arc_slot_builder.upper_neighbor = Some(bottom_edge_slot_builder.id);
+        bottom_arc_slot_builder.lower_neighbor = target_slot_lower_neighbor_id;
+
+        // attach new subtree
         target_slot.value = Node::Edge(top_edge);
+        self.nodes
+            .insert(top_arc_slot_builder.id, top_arc_slot_builder.build());
+        self.nodes.insert(
+            bottom_edge_slot_builder.id,
+            bottom_edge_slot_builder.build(),
+        );
+        self.nodes
+            .insert(new_arc_slot_builder.id, new_arc_slot_builder.build());
+        self.nodes
+            .insert(bottom_arc_slot_builder.id, bottom_arc_slot_builder.build());
+
+        // fix neighbor links around inserted subtree
+        match target_slot_upper_neighbor_id {
+            Some(id) => {
+                let upper_neighbor = self.nodes.get_mut(&id).unwrap();
+                upper_neighbor.lower_neighbor = Some(top_arc_slot_builder.id);
+            }
+            None => {}
+        }
+        match target_slot_lower_neighbor_id {
+            Some(id) => {
+                let lower_neighbor = self.nodes.get_mut(&id).unwrap();
+                lower_neighbor.upper_neighbor = Some(bottom_arc_slot_builder.id);
+            }
+            None => {}
+        }
+    }
+
+    pub fn get_lower_arc(&self, edge: &Edge) -> &Arc {
+        match &self.nodes[&edge.lower_child].value {
+            Node::Edge(edge) => &self.get_lower_arc(edge),
+            Node::Arc(arc) => &arc,
+        }
+    }
+    pub fn get_upper_arc(&self, edge: &Edge) -> &Arc {
+        match &self.nodes[&edge.upper_child].value {
+            Node::Edge(edge) => &self.get_upper_arc(edge),
+            Node::Arc(arc) => &arc,
+        }
+    }
+
+    pub fn get_endpoint_y(&self, edge: &Edge, directrix: f32) -> f32 {
+        let lower_arc = self.get_lower_arc(edge);
+        println!("{:?}", lower_arc);
+        println!("{:?}", edge.ray);
+        return lower_arc.intersection(&edge.ray, directrix).unwrap().y;
+    }
+
+    pub fn get_slot_id_at(&self, slot: &Slot, site: &Point) -> u32 {
+        if slot.is_leaf() {
+            return slot.id;
+        }
+        if let Node::Edge(edge) = &slot.value {
+            let directrix = site.x;
+            if self.get_endpoint_y(edge, directrix) >= site.y {
+                return self.get_slot_id_at(&self.nodes[&edge.lower_child], site);
+            } else {
+                return self.get_slot_id_at(&self.nodes[&edge.upper_child], site);
+            }
+        }
+        panic!("You shouldn't reach here.")
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Site {
     location: Point,
 }
@@ -462,7 +864,8 @@ impl Eq for Site {}
 impl Ord for Site {
     fn cmp(&self, other: &Self) -> Ordering {
         // Compare based on x only
-        self.location.x.total_cmp(&other.location.x)
+        // self.location.x.total_cmp(&other.location.x)
+        other.location.x.total_cmp(&self.location.x)
     }
 }
 
@@ -472,30 +875,70 @@ impl PartialOrd for Site {
     }
 }
 
-pub fn fortunes() -> HashMap<i32, Site> {
-    let mut rng = rand::thread_rng();
+pub fn fortunes() -> HashMap<usize, Site> {
+    let mut rng = rand::rng();
 
-    let mut sites = HashMap::new();
+    let mut sites = HashMap::<usize, Site>::new();
 
-    let num_sites = 10;
+    let num_sites = 5;
 
     let mut events = BinaryHeap::new();
-    for idx in 0..num_sites {
-        sites.insert(
-            idx,
-            Site {
-                location: Point {
-                    x: rng.gen(),
-                    y: rng.gen(),
-                },
-            },
-        );
-    }
+    // for idx in 0..num_sites {
+    //     sites.insert(
+    //         idx,
+    //         Site {
+    //             location: Point {
+    //                 x: rng.random(),
+    //                 y: rng.random(),
+    //             },
+    //         },
+    //     );
+    // }
+
+    // in a line at y=0
+    // sites.insert(
+    //     0,
+    //     Site {
+    //         location: Point { x: 0., y: 0. },
+    //     },
+    // );
+    // sites.insert(
+    //     1,
+    //     Site {
+    //         location: Point { x: 1., y: 0. },
+    //     },
+    // );
+    // sites.insert(
+    //     2,
+    //     Site {
+    //         location: Point { x: 2., y: 0. },
+    //     },
+    // );
+
+    // in a right-opening v
+    sites.insert(
+        0,
+        Site {
+            location: Point { x: 0., y: 0. },
+        },
+    );
+    sites.insert(
+        1,
+        Site {
+            location: Point { x: 1., y: 1. },
+        },
+    );
+    sites.insert(
+        2,
+        Site {
+            location: Point { x: 1.01, y: -1. },
+        },
+    );
 
     // let mut edges = Vec::new();
 
-    for idx in 0..num_sites {
-        events.push(sites.get(&idx).unwrap());
+    for idx in 0..sites.len() {
+        events.push(sites[&idx]);
     }
 
     // directrix is an x position, starting at the leftmost site
@@ -506,13 +949,24 @@ pub fn fortunes() -> HashMap<i32, Site> {
     let mut events_vec = Vec::new();
     while let Some(event) = events.pop() {
         directrix = event.location.x;
-        beachline.add_site(event);
+        beachline.add_site(&event);
         events_vec.push(event);
         // let arc = BeachlineElement::Arc(&event);
         // beachline.push_back(arc);
+        println!("beachline: {}", beachline);
     }
-
-    println!("{:?}", beachline);
+    let an_arc = &beachline.nodes[&beachline.nodes[&beachline.nodes[&beachline.root.unwrap()]
+        .lower_neighbor
+        .unwrap()]
+        .lower_neighbor
+        .unwrap()]
+        .lower_neighbor;
+    println!("{:?}", an_arc);
+    beachline.remove_arc(an_arc.unwrap());
+    println!("beachline: {}", beachline);
+    // ─┬─
+    //  ├─
+    //  └─
 
     // println!("{:?}", events_vec);
 
