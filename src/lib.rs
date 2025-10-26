@@ -1,4 +1,4 @@
-use rand::seq::SliceRandom;
+use rand::prelude::IndexedRandom;
 use rand::Rng;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -188,15 +188,15 @@ impl Maze {
 pub fn generate(width: u32, height: u32, cell_size: u32) {
     let mut maze = Maze::new(width, height, cell_size);
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     let mut graph = HashMap::new();
     let mut centers = HashMap::new();
     for u in 0..width {
         for v in 0..height {
             let pt = Point::new(
-                u as f32 + rng.gen::<f32>() / 5.0,
-                v as f32 + rng.gen::<f32>() / 5.0,
+                u as f32 + rng.random::<f32>() / 5.0,
+                v as f32 + rng.random::<f32>() / 5.0,
             );
             centers.insert(pt.id, pt);
         }
