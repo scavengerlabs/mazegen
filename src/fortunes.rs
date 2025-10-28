@@ -4,6 +4,10 @@ use std::collections::BinaryHeap;
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::Neg;
+use svg::node::element::path::Data;
+use svg::node::element::Circle;
+use svg::node::element::Path;
+use svg::Document;
 
 // binary tree with ids for arcs and edges, per Fortune's algorithm
 // map from arc id to adjacent edges
@@ -40,10 +44,97 @@ impl Point {
         let dx = self.x - other.x;
         let dy = self.y - other.y;
         if dy >= 0.0 {
-            return Direction::new(dx, -dy);
+            return Direction::new(dy, -dx);
         } else {
-            return Direction::new(-dx, dy);
+            return Direction::new(-dy, dx);
         }
+    }
+}
+
+#[derive(Debug)]
+struct LineSegment {
+    first: Point,
+    second: Point,
+}
+
+impl LineSegment {
+    pub fn length(&self) -> f32 {
+        return ((self.first.x - self.second.x).powi(2) + (self.first.y - self.second.y).powi(2))
+            .sqrt();
+    }
+    pub fn intersection(&self, ray: Ray) -> Option<Point> {
+        let segment_ray = Ray {
+            start: self.first,
+            direction: Direction::new(self.second.x - self.first.x, self.second.y - self.first.y),
+        };
+        match ray.intersection(segment_ray) {
+            Some(ray_intersection) => {
+                let segment_ray_length = segment_ray.project(&ray_intersection);
+                if segment_ray_length > self.length() {
+                    return None;
+                }
+                return Some(ray_intersection);
+            }
+            None => {
+                return None;
+            }
+        }
+        // let first = self.first;
+        // let second = self.second;
+        // let fourth = ray.start;
+        // let third = Point {
+        //     x: ray.start.x + ray.direction.x,
+        //     y: ray.start.y + ray.direction.y,
+        // };
+        // let den = (first.x - second.x) * (third.y - fourth.y)
+        //     - (first.y - second.y) * (third.x - fourth.x);
+        // let t_num =
+        //     (first.x - third.x) * (third.y - fourth.y) - (first.y - third.y) * (third.x - fourth.x);
+        // let u_num =
+        //     (first.x - second.x) * (first.y - third.y) - (first.y - second.y) * (first.x - third.x);
+        // let t = t_num / den;
+        // let u = u_num / den;
+        // println!("t: {:?}, u: {:?}", t, u);
+        // if t < 0.0 || t > 1.0 || u < 0.0 {
+        //     return None;
+        // }
+        // return Some(Point {
+        //     x: first.x + (second.x - first.x) * t,
+        //     y: first.y + (second.y - first.y) * t,
+        // });
+    }
+}
+
+struct Polyline {
+    points: Vec<Point>,
+}
+
+impl Polyline {
+    pub fn new() -> Self {
+        return Polyline { points: vec![] };
+    }
+    pub fn nearest_intersection(&self, ray: Ray) -> Option<Point> {
+        let mut output = None;
+        let mut min_distance = f32::MAX;
+        for idx in 0..self.points.len() - 1 {
+            let line_segment = LineSegment {
+                first: self.points[idx],
+                second: self.points[idx + 1],
+            };
+            println!("ray: {:?}, segment: {:?}", ray, line_segment);
+            match line_segment.intersection(ray) {
+                Some(point) => {
+                    let distance = ray.project(&point);
+                    println!("point: {:?}, distance: {:?}", point, distance);
+                    if distance < min_distance {
+                        min_distance = distance;
+                        output = Some(point);
+                    }
+                }
+                None => {}
+            }
+        }
+        return output;
     }
 }
 
@@ -124,6 +215,31 @@ impl Ray {
             x: self.start.x + self.direction.x * t_1,
             y: self.start.y + self.direction.y * t_1,
         });
+    }
+
+    pub fn terminate(&self, other: Ray) -> Option<(f32, f32)> {
+        let det = self.direction.x * (-other.direction.y) - (-other.direction.x) * self.direction.y;
+        if det == 0.0 {
+            return None;
+        }
+        let t_1 = ((other.start.x - self.start.x) * (-other.direction.y)
+            - (-other.direction.x) * (other.start.y - self.start.y))
+            / det;
+        let t_2 = (self.direction.x * (other.start.y - self.start.y)
+            - (other.start.x - self.start.x) * self.direction.y)
+            / det;
+        if t_1 < 0.0 || t_2 < 0.0 {
+            return None;
+        }
+        return Some((t_1, t_2));
+    }
+
+    pub fn project(&self, point: &Point) -> f32 {
+        let relative_point = Point {
+            x: point.x - self.start.x,
+            y: point.y - self.start.y,
+        };
+        return self.direction.project(&relative_point);
     }
 
     // Returns true if the point is "in front" of the ray
@@ -411,6 +527,7 @@ struct Edge {
     lower_child: u32,
     upper_child: u32,
     parent: Option<u32>,
+    length: Option<f32>, // present if the edge is complete
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -440,6 +557,7 @@ impl Arc {
 struct Beachline {
     root: Option<u32>,
     nodes: HashMap<u32, Slot>,
+    complete_edges: Vec<Edge>,
 }
 
 impl fmt::Display for Beachline {
@@ -466,6 +584,7 @@ impl Beachline {
         return Beachline {
             root: None,
             nodes: HashMap::new(),
+            complete_edges: vec![],
         };
     }
 
@@ -505,7 +624,7 @@ impl Beachline {
                 parent_edge.upper_child = new_child_slot_id;
                 // parent_slot.upper_neighbor = Some(upper_arc_slot_id);
             }
-            // // reassign edge to slot (in case we copied somewhere)
+            // reassign edge to slot
             parent_slot.value = Node::Edge(parent_edge);
             match self.nodes.get_mut(&new_child_slot_id).unwrap().value {
                 Node::Arc(mut new_child_mut) => {
@@ -525,6 +644,7 @@ impl Beachline {
                 lower_child: upper_edge.lower_child,
                 upper_child: upper_edge.upper_child,
                 parent: upper_edge.parent,
+                length: None,
             };
             // replace upper_edge with new_edge
             let upper_edge_slot_mut = self.nodes.get_mut(&upper_edge_slot_id).unwrap();
@@ -536,6 +656,8 @@ impl Beachline {
             lower_arc_slot_mut.upper_neighbor = Some(upper_edge_slot_id);
             let upper_arc_slot_mut = self.nodes.get_mut(&upper_arc_slot_id).unwrap();
             upper_arc_slot_mut.lower_neighbor = Some(upper_edge_slot_id);
+            // remove obsolete edge node
+            self.nodes.remove(&lower_edge_slot_id);
         } else if upper_edge.lower_child == target_arc_slot_id {
             // connect upper_edge.upper_child to upper_edge.parent
             // this cuts out upper_edge and its lower_child
@@ -571,6 +693,7 @@ impl Beachline {
                 lower_child: lower_edge.lower_child,
                 upper_child: lower_edge.upper_child,
                 parent: lower_edge.parent,
+                length: None,
             };
             // replace lower_edge with new_edge
             let lower_edge_slot_mut = self.nodes.get_mut(&lower_edge_slot_id).unwrap();
@@ -582,7 +705,16 @@ impl Beachline {
             lower_arc_slot_mut.upper_neighbor = Some(lower_edge_slot_id);
             let upper_arc_slot_mut = self.nodes.get_mut(&upper_arc_slot_id).unwrap();
             upper_arc_slot_mut.lower_neighbor = Some(lower_edge_slot_id);
+            // remove obsolete edge node
+            self.nodes.remove(&upper_edge_slot_id);
         }
+        let mut my_lower_edge = *lower_edge;
+        let mut my_upper_edge = *upper_edge;
+        let (lower_length, upper_length) = my_lower_edge.ray.terminate(my_upper_edge.ray).unwrap();
+        my_lower_edge.length = Some(lower_length);
+        my_upper_edge.length = Some(upper_length);
+        self.complete_edges.push(my_lower_edge);
+        self.complete_edges.push(my_upper_edge);
     }
 
     fn get_lower_edge(&self, arc_slot_id: u32) -> Option<Edge> {
@@ -695,6 +827,7 @@ impl Beachline {
             lower_child: bottom_arc_slot_builder.id,
             upper_child: new_arc_slot_builder.id,
             parent: Some(top_edge_slot_builder.id),
+            length: None,
         };
         bottom_edge_slot_builder.value = Some(Node::Edge(bottom_edge));
         let top_edge = Edge {
@@ -702,6 +835,7 @@ impl Beachline {
             lower_child: bottom_edge_slot_builder.id,
             upper_child: top_arc_slot_builder.id,
             parent: target_arc.parent,
+            length: None,
         };
 
         let target_slot_upper_neighbor_id = target_slot.upper_neighbor;
@@ -847,6 +981,8 @@ pub fn fortunes() -> HashMap<usize, Site> {
     let num_sites = 5;
 
     let mut events = BinaryHeap::new();
+
+    // // random
     // for idx in 0..num_sites {
     //     sites.insert(
     //         idx,
@@ -859,7 +995,7 @@ pub fn fortunes() -> HashMap<usize, Site> {
     //     );
     // }
 
-    // in a line at y=0
+    // // in a line at y=0
     // sites.insert(
     //     0,
     //     Site {
@@ -905,9 +1041,6 @@ pub fn fortunes() -> HashMap<usize, Site> {
         events.push(Event::Site(sites[&idx]));
     }
 
-    // directrix is an x position, starting at the leftmost site
-    let mut directrix = 0.0;
-
     let mut beachline = Beachline::new();
 
     // let mut events_vec = Vec::new();
@@ -939,11 +1072,97 @@ pub fn fortunes() -> HashMap<usize, Site> {
         // let arc = BeachlineElement::Arc(&event);
         // beachline.push_back(arc);
         println!("beachline: {}", beachline);
+        println!("complete edges: {:?}", beachline.complete_edges);
     }
+    let mut boundaries = Polyline::new();
+    boundaries.points.push(Point { x: -2.0, y: -2.0 });
+    boundaries.points.push(Point { x: -2.0, y: 2.0 });
+    boundaries.points.push(Point { x: 2.0, y: 2.0 });
+    boundaries.points.push(Point { x: 2.0, y: -2.0 });
+    boundaries.points.push(Point { x: -2.0, y: -2.0 });
+
+    let mut document = Document::new().set("viewBox", (-2, -2, 4, 4));
+
+    for idx in 0..boundaries.points.len() - 1 {
+        let start = boundaries.points[idx];
+        let end = boundaries.points[idx + 1];
+        let data = Data::new()
+            .move_to((start.x, start.y))
+            .line_by((end.x - start.x, end.y - start.y))
+            .close();
+
+        let path = Path::new()
+            .set("fill", "none")
+            .set("stroke", "black")
+            .set("stroke-width", 0.1)
+            .set("d", data);
+
+        document = document.add(path);
+    }
+
+    for node in beachline.nodes.values() {
+        match node.value {
+            Node::Arc(arc) => {
+                let path = Circle::new()
+                    .set("fill", "black")
+                    .set("cx", arc.focus.x)
+                    .set("cy", arc.focus.y)
+                    .set("r", 0.1);
+
+                document = document.add(path);
+            }
+            Node::Edge(edge) => {
+                println!("handling edge {:?}", edge);
+                match boundaries.nearest_intersection(edge.ray) {
+                    Some(point) => {
+                        println!("intersection point {:?}", point);
+                        // edge.length = Some(edge.ray.project(&point));
+                        // println!("plotting edge {:?}", edge);
+                        let path = get_path_from_points(&edge.ray.start, &point);
+
+                        document = document.add(path);
+                    }
+                    None => {
+                        println!("found no intersection with boundaries")
+                    }
+                }
+            }
+        }
+    }
+
+    for edge in beachline.complete_edges {
+        let path = get_path_from_edge(&edge);
+
+        document = document.add(path);
+    }
+
+    svg::save("image.svg", &document).unwrap();
 
     // println!("{:?}", events_vec);
 
     return sites;
+}
+
+fn get_path_from_edge(edge: &Edge) -> Path {
+    let start = edge.ray.start;
+    let end = Point {
+        x: start.x + edge.ray.direction.x * edge.length.unwrap(),
+        y: start.y + edge.ray.direction.y * edge.length.unwrap(),
+    };
+    return get_path_from_points(&start, &end);
+}
+
+fn get_path_from_points(start: &Point, end: &Point) -> Path {
+    let data = Data::new()
+        .move_to((start.x, start.y))
+        .line_by((end.x - start.x, end.y - start.y))
+        .close();
+
+    return Path::new()
+        .set("fill", "none")
+        .set("stroke", "black")
+        .set("stroke-width", 0.1)
+        .set("d", data);
 }
 
 #[cfg(test)]
