@@ -846,19 +846,6 @@ fn plot(beachline: &Beachline, boundaries: &Polyline) {
 }
 
 fn run_fortunes(points: Vec<(f32, f32)>, boundary_points: Vec<(f32, f32)>) -> Vec<LineSegment> {
-    // // random
-    // let mut rng = rand::rng();
-    // let mut sites = vec![];
-    // let num_sites = 20;
-    // for _ in 0..num_sites {
-    //     sites.push(Site {
-    //         location: Point {
-    //             x: rng.random::<f32>() * 4. - 2.,
-    //             y: rng.random::<f32>() * 4. - 2.,
-    //         },
-    //     });
-    // }
-
     let sites = add_sites(points);
 
     let mut boundaries = Polyline::new();
@@ -879,3 +866,23 @@ fn run_fortunes(points: Vec<(f32, f32)>, boundary_points: Vec<(f32, f32)>) -> Ve
 #[cfg(test)]
 #[path = "fortunes_tests.rs"]
 mod tests;
+
+fn main() {
+    let mut rng = rand::rng();
+    let mut sites = vec![];
+    let num_sites = 20;
+
+    for _ in 0..num_sites {
+        sites.push((rng.random::<f32>() * 4. - 2., rng.random::<f32>() * 4. - 2.));
+    }
+
+    let boundary_polyline = vec![
+        (-2.0, -2.0),
+        (-2.0, 2.0),
+        (2.0, 2.0),
+        (2.0, -2.0),
+        (-2.0, -2.0),
+    ];
+
+    run_fortunes(sites, boundary_polyline);
+}

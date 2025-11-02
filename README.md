@@ -11,3 +11,9 @@ python -m http.server
 ```
 
 navigate to localhost:8000/index.html
+
+## Run Fortune's algorithm
+
+```bash
+cargo run --bin fortunes
+```
