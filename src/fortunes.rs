@@ -7,6 +7,7 @@ use std::ops::Neg;
 use std::sync::atomic::{AtomicU32, Ordering};
 use svg::node::element::path::Data;
 use svg::node::element::Circle;
+use svg::node::element::Line;
 use svg::node::element::Path;
 use svg::Document;
 
@@ -34,6 +35,11 @@ impl Point {
     pub fn distance_from(&self, other: &Point) -> f32 {
         // compute Euclidean distance between points
         return ((self.x - other.x).powf(2.0) + (self.y - other.y).powf(2.0)).sqrt();
+    }
+
+    pub fn close_to(&self, other: &Point, epsilon: f32) -> bool {
+        let distance = self.distance_from(other);
+        return distance <= epsilon;
     }
 
     pub fn perpendicular(&self, other: &Point) -> Direction {
@@ -516,7 +522,20 @@ struct Edge {
     lower_child: u32,
     upper_child: u32,
     parent: Option<u32>,
-    length: Option<f32>, // present if the edge is complete
+}
+
+impl Edge {
+    pub fn to_line_segment(&self, length: f32) -> LineSegment {
+        let first = self.ray.start;
+        let second = Point {
+            x: first.x + self.ray.direction.x * length,
+            y: first.y + self.ray.direction.y * length,
+        };
+        return LineSegment {
+            first: first,
+            second: second,
+        };
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -546,7 +565,7 @@ impl Arc {
 struct Beachline {
     root: Option<u32>,
     nodes: HashMap<u32, Slot>,
-    complete_edges: Vec<Edge>,
+    complete_edges: Vec<LineSegment>,
     complete_sites: Vec<Point>,
 }
 
@@ -577,6 +596,22 @@ impl Beachline {
             complete_edges: vec![],
             complete_sites: vec![],
         };
+    }
+
+    pub fn sorted_edges(&self, root: u32) -> Vec<Edge> {
+        match self.nodes[&root].value {
+            Node::Edge(edge) => {
+                return vec![
+                    self.sorted_edges(edge.upper_child),
+                    vec![edge],
+                    self.sorted_edges(edge.lower_child),
+                ]
+                .concat();
+            }
+            Node::Arc(_) => {
+                return vec![];
+            }
+        }
     }
 
     // each edge corresponds to a y value where two arcs collide
@@ -658,7 +693,6 @@ impl Beachline {
                 lower_child: upper_edge.lower_child,
                 upper_child: upper_edge.upper_child,
                 parent: upper_edge.parent,
-                length: None,
             };
             // replace upper_edge with new_edge
             let mut new_edge_slot_builder = Slot::builder();
@@ -741,7 +775,6 @@ impl Beachline {
                 lower_child: lower_edge.lower_child,
                 upper_child: lower_edge.upper_child,
                 parent: lower_edge.parent,
-                length: None,
             };
 
             // replace lower_edge with new_edge
@@ -805,13 +838,11 @@ impl Beachline {
 
         self.complete_sites.push(target_arc.focus);
 
-        let mut my_lower_edge = *lower_edge;
-        let mut my_upper_edge = *upper_edge;
-        let (lower_length, upper_length) = my_lower_edge.ray.terminate(my_upper_edge.ray).unwrap();
-        my_lower_edge.length = Some(lower_length);
-        my_upper_edge.length = Some(upper_length);
-        self.complete_edges.push(my_lower_edge);
-        self.complete_edges.push(my_upper_edge);
+        let (lower_length, upper_length) = lower_edge.ray.terminate(upper_edge.ray).unwrap();
+        self.complete_edges
+            .push(lower_edge.to_line_segment(lower_length));
+        self.complete_edges
+            .push(upper_edge.to_line_segment(upper_length));
         return arcs_to_check;
     }
 
@@ -922,7 +953,6 @@ impl Beachline {
             lower_child: bottom_arc_slot_builder.id,
             upper_child: new_arc_slot_builder.id,
             parent: Some(target_slot_id),
-            length: None,
         };
         bottom_edge_slot_builder.value = Some(Node::Edge(bottom_edge));
         let top_edge = Edge {
@@ -930,7 +960,6 @@ impl Beachline {
             lower_child: bottom_edge_slot_builder.id,
             upper_child: top_arc_slot_builder.id,
             parent: target_arc.parent,
-            length: None,
         };
 
         let target_slot_upper_neighbor_id = target_slot.upper_neighbor;
@@ -1097,29 +1126,26 @@ impl PartialEq for Site {
 
 impl Eq for Site {}
 
-fn add_sites(points: Vec<(f32, f32)>) -> HashMap<usize, Site> {
-    let mut sites = HashMap::<usize, Site>::new();
+fn add_sites(points: Vec<(f32, f32)>) -> Vec<Site> {
+    let mut sites = vec![];
 
-    for (idx, point) in points.iter().enumerate() {
-        sites.insert(
-            idx,
-            Site {
-                location: Point {
-                    x: point.0,
-                    y: point.1,
-                },
+    for point in points {
+        sites.push(Site {
+            location: Point {
+                x: point.0,
+                y: point.1,
             },
-        );
+        });
     }
 
     return sites;
 }
 
-fn fortunes(sites: HashMap<usize, Site>, boundaries: &Polyline) -> Beachline {
+fn fortunes(sites: Vec<Site>, boundaries: &Polyline) -> Beachline {
     let mut events = BinaryHeap::new();
 
-    for idx in 0..sites.len() {
-        events.push(Event::Site(sites[&idx]));
+    for site in sites {
+        events.push(Event::Site(site));
     }
 
     let mut beachline = Beachline::new();
@@ -1142,38 +1168,21 @@ fn fortunes(sites: HashMap<usize, Site>, boundaries: &Polyline) -> Beachline {
     }
 
     // complete rays
-    for node in beachline.nodes.values() {
-        match node.value {
-            Node::Arc(_) => {}
-            Node::Edge(mut edge) => match boundaries.furthest_intersection(edge.ray) {
-                Some(point) => {
-                    edge.length = Some(edge.ray.project(&point));
-                    beachline.complete_edges.push(edge);
-                }
-                None => {
-                    println!("found no intersection with boundaries")
-                }
-            },
+    for edge in beachline.sorted_edges(beachline.root.unwrap()) {
+        match boundaries.furthest_intersection(edge.ray) {
+            Some(point) => {
+                beachline.complete_edges.push(LineSegment {
+                    first: edge.ray.start,
+                    second: point,
+                });
+            }
+            None => {
+                println!("found no intersection with boundaries")
+            }
         }
     }
 
     return beachline;
-}
-
-fn get_paths_from_edge(edge: &Edge, color: &str) -> Vec<Path> {
-    let start = edge.ray.start;
-    let start_plus = Point {
-        x: start.x + edge.ray.direction.x * 0.1,
-        y: start.y + edge.ray.direction.y * 0.1,
-    };
-    let end = Point {
-        x: start.x + edge.ray.direction.x * edge.length.unwrap(),
-        y: start.y + edge.ray.direction.y * edge.length.unwrap(),
-    };
-    return vec![
-        get_path_from_points(&start, &end, color),
-        get_path_from_points(&start, &start_plus, "red"),
-    ];
 }
 
 fn get_path_from_points(start: &Point, end: &Point, color: &str) -> Path {
@@ -1226,10 +1235,9 @@ fn plot(beachline: &Beachline, boundaries: &Polyline) {
         }
     }
 
-    for edge in &beachline.complete_edges {
-        for path in get_paths_from_edge(&edge, "green") {
-            document = document.add(path);
-        }
+    for segment in &beachline.complete_edges {
+        let path = get_path_from_points(&segment.first, &segment.second, "green");
+        document = document.add(path);
     }
 
     for point in &beachline.complete_sites {
@@ -1246,305 +1254,37 @@ fn plot(beachline: &Beachline, boundaries: &Polyline) {
     svg::save("image.svg", &document).unwrap();
 }
 
-pub fn run_fortunes() {
-    let mut rng = rand::rng();
+fn run_fortunes(points: Vec<(f32, f32)>, boundary_points: Vec<(f32, f32)>) -> Vec<LineSegment> {
+    // // random
+    // let mut rng = rand::rng();
+    // let mut sites = vec![];
+    // let num_sites = 20;
+    // for _ in 0..num_sites {
+    //     sites.push(Site {
+    //         location: Point {
+    //             x: rng.random::<f32>() * 4. - 2.,
+    //             y: rng.random::<f32>() * 4. - 2.,
+    //         },
+    //     });
+    // }
 
-    let mut sites = HashMap::<usize, Site>::new();
-
-    // random
-    let num_sites = 20;
-    for idx in 0..num_sites {
-        sites.insert(
-            idx,
-            Site {
-                location: Point {
-                    x: rng.random::<f32>() * 4. - 2.,
-                    y: rng.random::<f32>() * 4. - 2.,
-                },
-            },
-        );
-    }
-
-    // // fail bug 8
-    // let points = vec![
-    //     (-1.26, 1.02),
-    //     (0.36, 0.64),
-    //     (0.83, 0.45),
-    //     (-1.07, -1.07),
-    //     (1.74, -1.05),
-    // ];
-    // sites = add_sites(points);
-
-    // // fail bug 7
-    // let points = vec![
-    //     (-1.77, 1.60),
-    //     (0.24, 1.60),
-    //     (1.14, -1.51),
-    //     (-1.20, -0.76),
-    //     (0.54, -1.08),
-    // ];
-    // sites = add_sites(points);
-
-    // // fail bug 6
-    // let points = vec![
-    //     (-1.00, 1.97),
-    //     (1.68, 0.86),
-    //     (-0.92, -0.36),
-    //     (0.98, -1.07),
-    //     (0.32, -1.18),
-    // ];
-    // sites = add_sites(points);
-
-    // // fail bug 5
-    // let points = vec![(-0.46, -0.94), (-0.28, 1.74), (-0.35, -0.10), (1.00, -1.10)];
-    // sites = add_sites(points);
-
-    // // fail bug 4
-    // let points = vec![(-1.68, 0.22), (-1.06, -0.80), (-0.25, -0.40), (1.57, -1.90)];
-    // sites = add_sites(points);
-
-    // // // fail bug 3
-    // let points = vec![(-0.10, 1.57), (0.62, 1.48), (1.66, 0.43), (1.84, -0.19)];
-    // sites = add_sites(points);
-
-    // // fail bug 2
-    // let points = vec![
-    //     (-1.77, 1.17),
-    //     (-1.76, 1.89),
-    //     (-1.57, -1.87),
-    //     (1.70, 0.44),
-    //     (0.32, -1.18),
-    // ];
-    // sites = add_sites(points);
-
-    // // fail bug 1
-    // let points = vec![(0.14, -1.10), (0.44, -0.08), (0.42, -1.09)];
-    // sites = add_sites(points);
-
-    // // // edge bug 2
-    // let points = vec![(0.00, 0.20), (0.50, 1.50), (0.70, 0.10)];
-    // sites = add_sites(points);
-
-    // // in a line at y=0
-    // let points = vec![(0.00, 0.00), (1.00, 0.00), (2.00, 0.00)];
-    // sites = add_sites(points);
-
-    // // in a right-opening v
-    // let points = vec![(0.00, 0.00), (1.00, 1.00), (1.01, -1.00)];
-    // sites = add_sites(points);
-
-    // // edge bug 1
-    // let points = vec![(-1.90, 1.00), (1.00, 0.00), (1.80, 1.30)];
-    // sites = add_sites(points);
+    let sites = add_sites(points);
 
     let mut boundaries = Polyline::new();
-    boundaries.points.push(Point { x: -2.0, y: -2.0 });
-    boundaries.points.push(Point { x: -2.0, y: 2.0 });
-    boundaries.points.push(Point { x: 2.0, y: 2.0 });
-    boundaries.points.push(Point { x: 2.0, y: -2.0 });
-    boundaries.points.push(Point { x: -2.0, y: -2.0 });
+    for point in boundary_points {
+        boundaries.points.push(Point {
+            x: point.0,
+            y: point.1,
+        });
+    }
 
     let beachline = fortunes(sites, &boundaries);
+
     plot(&beachline, &boundaries);
+
+    return beachline.complete_edges;
 }
 
 #[cfg(test)]
-mod tests {
-    // Note this useful idiom: importing names from outer (for mod tests) scope.
-    use super::*;
-
-    #[test]
-    fn test_fortunes() {
-        run_fortunes();
-        // assert_eq!(fortunes(), HashMap::new());
-    }
-
-    #[test]
-    fn test_ray() {
-        let ray1 = Ray {
-            start: Point::new(0.0, 0.0),
-            direction: Direction::new(1.0, 0.0),
-        };
-        let ray2 = Ray {
-            start: Point::new(1.0, 1.0),
-            direction: Direction::new(0.0, -1.0),
-        };
-        let expected_intersection = Point::new(1.0, 0.0);
-        assert!(
-            ray1.intersection(ray2)
-                .unwrap()
-                .distance_from(&expected_intersection)
-                < 1e-5
-        );
-
-        let ray1 = Ray {
-            start: Point::new(0.0, 0.0),
-            direction: Direction::new(1.0, 1.0),
-        };
-        let ray2 = Ray {
-            start: Point::new(3.0, 0.0),
-            direction: Direction::new(0.0, 1.0),
-        };
-        let expected_intersection = Point::new(3.0, 3.0);
-        assert!(
-            ray1.intersection(ray2)
-                .unwrap()
-                .distance_from(&expected_intersection)
-                < 1e-5
-        );
-    }
-
-    #[test]
-    fn test_parabola_1() {
-        // ray perpendicular to directrix, passing through parabola
-        let focus = Point::new(2.0, 0.0);
-        let parabola = Parabola {
-            focus: focus,
-            directrix: 0.0,
-        };
-        let ray = Ray {
-            start: Point::new(0.0, 0.0),
-            direction: Direction::new(1.0, 0.0),
-        };
-        let expected_intersection = Point::new(1.0, 0.0);
-        assert!(
-            parabola
-                .intersection(&ray)
-                .unwrap()
-                .distance_from(&expected_intersection)
-                < 1e-5
-        );
-    }
-
-    #[test]
-    fn test_parabola_2() {
-        // ray parallel to directrix, passing through both sides of parabola
-        let focus = Point::new(2.0, 0.0);
-        let parabola = Parabola {
-            focus: focus,
-            directrix: 0.0,
-        };
-        let ray = Ray {
-            start: Point::new(3.0, -10.0),
-            direction: Direction::new(0.0, 1.0),
-        };
-        let expected_intersection = Point::new(3.0, -2.828427);
-        assert!(
-            parabola
-                .intersection(&ray)
-                .unwrap()
-                .distance_from(&expected_intersection)
-                < 1e-5
-        );
-    }
-
-    #[test]
-    fn test_parabola_3() {
-        let focus = Point::new(3.0, 4.0);
-        let parabola = Parabola {
-            focus: focus,
-            directrix: 1.0,
-        };
-        let ray = Ray {
-            start: Point::new(4.0, 0.0),
-            direction: Direction::new(2.0, 1.0),
-        };
-        let expected_intersection = Point::new(5.033371, 0.516685);
-        assert!(
-            parabola
-                .intersection(&ray)
-                .unwrap()
-                .distance_from(&expected_intersection)
-                < 1e-5
-        );
-    }
-
-    #[test]
-    fn test_parabola_4() {
-        let focus = Point::new(3.0, 4.0);
-        let parabola = Parabola {
-            focus: focus,
-            directrix: 1.0,
-        };
-        let ray = Ray {
-            start: Point::new(4.0, 3.0),
-            direction: Direction::new(2.0, 1.0),
-        };
-        let expected_intersection = Point::new(25.313711, 13.656855);
-        assert!(
-            parabola
-                .intersection(&ray)
-                .unwrap()
-                .distance_from(&expected_intersection)
-                < 1e-5
-        );
-    }
-
-    #[test]
-    fn test_parabola_5() {
-        let focus = Point::new(2.0, 0.0);
-        let parabola = Parabola {
-            focus: focus,
-            directrix: 4.0,
-        };
-        let ray = Ray {
-            start: Point::new(0.0, 1.0),
-            direction: Direction::new(1.0, 0.0),
-        };
-        let expected_intersection = Point::new(2.75, 1.0);
-        assert!(
-            parabola
-                .intersection(&ray)
-                .unwrap()
-                .distance_from(&expected_intersection)
-                < 1e-5
-        );
-    }
-
-    #[test]
-    fn test_parabola_6() {
-        let focus = Point::new(2.0, 0.0);
-        let parabola = Parabola {
-            focus: focus,
-            directrix: 4.0,
-        };
-        let ray = Ray {
-            start: Point::new(6.0, 1.0),
-            direction: Direction::new(0.0, 1.0),
-        };
-        assert!(parabola.intersection(&ray).is_none());
-    }
-
-    #[test]
-    fn test_parabola_7() {
-        // ray perpendicular to directrix, starting inside parabola
-        let focus = Point::new(2.0, 0.0);
-        let parabola = Parabola {
-            focus: focus,
-            directrix: 0.0,
-        };
-        let ray = Ray {
-            start: Point::new(3.0, 0.0),
-            direction: Direction::new(1.0, 0.0),
-        };
-        assert!(parabola.intersection(&ray).is_none());
-    }
-
-    #[test]
-    fn test_parabola_tangent_1() {
-        let focus = Point::new(2.0, 0.0);
-        let parabola = Parabola {
-            focus: focus,
-            directrix: 4.0,
-        };
-        let point = Point::new(2.75, 1.0);
-        let expected_direction = Direction::new(-0.4472136, 0.8944272);
-        println!("tangent: {:?}", parabola.tangent_at(&point));
-        assert!(
-            parabola
-                .tangent_at(&point)
-                .cosine_distance(&expected_direction)
-                < 1e-5
-        );
-    }
-}
+#[path = "fortunes_tests.rs"] // Specify the path to the test file
+mod tests;
