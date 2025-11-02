@@ -22,7 +22,7 @@ struct Slot {
 
 static GLOBAL_ID_COUNTER: AtomicU32 = AtomicU32::new(1);
 
-pub fn generate_id() -> u32 {
+fn generate_id() -> u32 {
     GLOBAL_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
@@ -166,8 +166,8 @@ impl Edge {
     pub fn to_line_segment(&self, length: f32) -> LineSegment {
         let first = self.ray.start;
         let second = Point {
-            x: first.x + self.ray.direction.x * length,
-            y: first.y + self.ray.direction.y * length,
+            x: self.ray.start.x + self.ray.direction.x * length,
+            y: self.ray.start.y + self.ray.direction.y * length,
         };
         return LineSegment {
             first: first,
@@ -295,169 +295,119 @@ impl Beachline {
             direction: new_direction,
         };
         // adjust binary tree
-        if lower_edge.upper_child == target_arc_slot_id {
-            // connect lower_edge.lower_child to lower_edge.parent
-            // this cuts out lower_edge and its upper_child (AKA target_arc)
-            let new_child_slot_id = lower_edge.lower_child;
-            match lower_edge.parent {
-                Some(parent_slot_id) => {
-                    let parent_slot = self.nodes.get_mut(&parent_slot_id).unwrap();
-                    let mut parent_edge = parent_slot.value.get_edge().unwrap();
-                    if parent_edge.lower_child == lower_edge_slot_id {
-                        parent_edge.lower_child = new_child_slot_id;
-                    } else if parent_edge.upper_child == lower_edge_slot_id {
-                        parent_edge.upper_child = new_child_slot_id;
-                    }
-                    // reassign edge to slot
-                    parent_slot.value = Node::Edge(parent_edge);
-                }
-                None => {}
-            }
-            let new_child_slot = self.nodes.get_mut(&new_child_slot_id).unwrap();
-            match new_child_slot.value {
-                Node::Arc(mut new_child_mut) => {
-                    new_child_mut.parent = lower_edge.parent;
-                    new_child_slot.value = Node::Arc(new_child_mut);
-                }
-                Node::Edge(mut new_child_mut) => {
-                    new_child_mut.parent = lower_edge.parent;
-                    new_child_slot.value = Node::Edge(new_child_mut);
-                }
-            }
-            // fetch upper_edge anew because we've modified self.nodes
-            let target_arc_slot = &self.nodes[&target_arc_slot_id];
-            let upper_edge_slot = &self.nodes[&target_arc_slot.upper_neighbor.unwrap()];
-            let upper_edge = &upper_edge_slot.value.get_edge().unwrap();
-            // create a new_edge between arcs lower_neighbor.lower_neighbor and upper_neighbor.upper_neighbor
-            let new_edge = Edge {
-                ray: new_ray,
-                lower_child: upper_edge.lower_child,
-                upper_child: upper_edge.upper_child,
-                parent: upper_edge.parent,
+        let (edge_slot_id_to_remove, edge_slot_id_to_replace, new_child_slot_id, parent_slot_id) =
+            if lower_edge.upper_child == target_arc_slot_id {
+                // connect lower_edge.lower_child to lower_edge.parent
+                // this cuts out lower_edge and its upper_child (AKA target_arc)
+                let edge_slot_id_to_remove = lower_edge_slot_id;
+                let edge_slot_id_to_replace = upper_edge_slot_id;
+                let new_child_slot_id = lower_edge.lower_child;
+                let parent_slot_id = lower_edge.parent;
+                (
+                    edge_slot_id_to_remove,
+                    edge_slot_id_to_replace,
+                    new_child_slot_id,
+                    parent_slot_id,
+                )
+            } else if upper_edge.lower_child == target_arc_slot_id {
+                // connect upper_edge.upper_child to upper_edge.parent
+                // this cuts out upper_edge and its lower_child (AKA target_arc)
+                let edge_slot_id_to_remove = upper_edge_slot_id;
+                let edge_slot_id_to_replace = lower_edge_slot_id;
+                let new_child_slot_id = upper_edge.upper_child;
+                let parent_slot_id = upper_edge.parent;
+                (
+                    edge_slot_id_to_remove,
+                    edge_slot_id_to_replace,
+                    new_child_slot_id,
+                    parent_slot_id,
+                )
+            } else {
+                panic!("Impossible!");
             };
-            // replace upper_edge with new_edge
-            let mut new_edge_slot_builder = Slot::builder();
-            new_edge_slot_builder.lower_neighbor = Some(lower_arc_slot_id);
-            new_edge_slot_builder.upper_neighbor = Some(upper_arc_slot_id);
-            new_edge_slot_builder.value = Some(Node::Edge(new_edge));
-
-            match &mut self.nodes.get_mut(&upper_edge.lower_child).unwrap().value {
-                Node::Arc(arc) => arc.parent = Some(new_edge_slot_builder.id),
-                Node::Edge(edge) => edge.parent = Some(new_edge_slot_builder.id),
-            };
-
-            match &mut self.nodes.get_mut(&upper_edge.upper_child).unwrap().value {
-                Node::Arc(arc) => arc.parent = Some(new_edge_slot_builder.id),
-                Node::Edge(edge) => edge.parent = Some(new_edge_slot_builder.id),
-            };
-
-            match upper_edge.parent {
-                Some(parent_id) => {
-                    let parent_slot = self.nodes.get_mut(&parent_id).unwrap();
-                    let mut parent_edge = parent_slot.value.get_edge().unwrap();
-                    if parent_edge.lower_child == upper_edge_slot_id {
-                        parent_edge.lower_child = new_edge_slot_builder.id;
-                    } else if parent_edge.upper_child == upper_edge_slot_id {
-                        parent_edge.upper_child = new_edge_slot_builder.id;
-                    } else {
-                        panic!("This should not be.")
-                    }
-                    parent_slot.value = Node::Edge(parent_edge);
+        match parent_slot_id {
+            Some(parent_slot_id) => {
+                let parent_slot = self.nodes.get_mut(&parent_slot_id).unwrap();
+                let mut parent_edge = parent_slot.value.get_edge().unwrap();
+                if parent_edge.lower_child == edge_slot_id_to_remove {
+                    parent_edge.lower_child = new_child_slot_id;
+                } else if parent_edge.upper_child == edge_slot_id_to_remove {
+                    parent_edge.upper_child = new_child_slot_id;
                 }
-                None => self.root = Some(new_edge_slot_builder.id),
+                // reassign edge to slot
+                parent_slot.value = Node::Edge(parent_edge);
             }
-            self.nodes
-                .insert(new_edge_slot_builder.id, new_edge_slot_builder.build());
-            // fix neighbors
-            let lower_arc_slot_mut = self.nodes.get_mut(&lower_arc_slot_id).unwrap();
-            lower_arc_slot_mut.upper_neighbor = Some(new_edge_slot_builder.id);
-            let upper_arc_slot_mut = self.nodes.get_mut(&upper_arc_slot_id).unwrap();
-            upper_arc_slot_mut.lower_neighbor = Some(new_edge_slot_builder.id);
-        } else if upper_edge.lower_child == target_arc_slot_id {
-            // connect upper_edge.upper_child to upper_edge.parent
-            // this cuts out upper_edge and its lower_child
-            let new_child_slot_id = upper_edge.upper_child;
-            match upper_edge.parent {
-                Some(parent_slot_id) => {
-                    let parent_slot = self.nodes.get_mut(&parent_slot_id).unwrap();
-                    let mut parent_edge = parent_slot.value.get_edge().unwrap();
-                    if parent_edge.lower_child == upper_edge_slot_id {
-                        parent_edge.lower_child = new_child_slot_id;
-                    } else if parent_edge.upper_child == upper_edge_slot_id {
-                        parent_edge.upper_child = new_child_slot_id;
-                    } else {
-                        panic!("This should not be.")
-                    }
-                    // reassign edge to slot
-                    parent_slot.value = Node::Edge(parent_edge);
-                }
-                None => {
-                    // TODO: what if upper_edge has no parent?
-                }
-            }
-            let new_child_slot = self.nodes.get_mut(&new_child_slot_id).unwrap();
-            match new_child_slot.value {
-                Node::Arc(mut new_child_mut) => {
-                    new_child_mut.parent = upper_edge.parent;
-                    new_child_slot.value = Node::Arc(new_child_mut);
-                }
-                Node::Edge(mut new_child_mut) => {
-                    new_child_mut.parent = upper_edge.parent;
-                    new_child_slot.value = Node::Edge(new_child_mut);
-                }
-            }
-            // fetch lower_edge anew because we've modified self.nodes
-            let target_arc_slot = &self.nodes[&target_arc_slot_id];
-            let lower_edge_slot = &self.nodes[&target_arc_slot.lower_neighbor.unwrap()];
-            let lower_edge = &lower_edge_slot.value.get_edge().unwrap();
-            // create a new_edge between arcs lower_neighbor.lower_neighbor and upper_neighbor.upper_neighbor
-            let new_edge = Edge {
-                ray: new_ray,
-                lower_child: lower_edge.lower_child,
-                upper_child: lower_edge.upper_child,
-                parent: lower_edge.parent,
-            };
-
-            // replace lower_edge with new_edge
-            let mut new_edge_slot_builder = Slot::builder();
-            new_edge_slot_builder.lower_neighbor = Some(lower_arc_slot_id);
-            new_edge_slot_builder.upper_neighbor = Some(upper_arc_slot_id);
-            new_edge_slot_builder.value = Some(Node::Edge(new_edge));
-
-            match &mut self.nodes.get_mut(&lower_edge.lower_child).unwrap().value {
-                Node::Arc(arc) => arc.parent = Some(new_edge_slot_builder.id),
-                Node::Edge(edge) => edge.parent = Some(new_edge_slot_builder.id),
-            };
-
-            match &mut self.nodes.get_mut(&lower_edge.upper_child).unwrap().value {
-                Node::Arc(arc) => arc.parent = Some(new_edge_slot_builder.id),
-                Node::Edge(edge) => edge.parent = Some(new_edge_slot_builder.id),
-            };
-
-            match lower_edge.parent {
-                Some(parent_id) => {
-                    let parent_slot = self.nodes.get_mut(&parent_id).unwrap();
-                    let mut parent_edge = parent_slot.value.get_edge().unwrap();
-                    if parent_edge.lower_child == lower_edge_slot_id {
-                        parent_edge.lower_child = new_edge_slot_builder.id;
-                    } else if parent_edge.upper_child == lower_edge_slot_id {
-                        parent_edge.upper_child = new_edge_slot_builder.id;
-                    } else {
-                        panic!("This should not be.")
-                    }
-                    parent_slot.value = Node::Edge(parent_edge);
-                }
-                None => self.root = Some(new_edge_slot_builder.id),
-            }
-            self.nodes
-                .insert(new_edge_slot_builder.id, new_edge_slot_builder.build());
-
-            // fix neighbors
-            let lower_arc_slot_mut = self.nodes.get_mut(&lower_arc_slot_id).unwrap();
-            lower_arc_slot_mut.upper_neighbor = Some(new_edge_slot_builder.id);
-            let upper_arc_slot_mut = self.nodes.get_mut(&upper_arc_slot_id).unwrap();
-            upper_arc_slot_mut.lower_neighbor = Some(new_edge_slot_builder.id);
+            None => {}
         }
+        let new_child_slot = self.nodes.get_mut(&new_child_slot_id).unwrap();
+        match new_child_slot.value {
+            Node::Arc(mut new_child_mut) => {
+                new_child_mut.parent = parent_slot_id;
+                new_child_slot.value = Node::Arc(new_child_mut);
+            }
+            Node::Edge(mut new_child_mut) => {
+                new_child_mut.parent = parent_slot_id;
+                new_child_slot.value = Node::Edge(new_child_mut);
+            }
+        }
+        // fetch upper_edge anew because we've modified self.nodes
+        let edge_slot_to_be_replaced = &self.nodes[&edge_slot_id_to_replace];
+        let edge_to_be_replaced = &edge_slot_to_be_replaced.value.get_edge().unwrap();
+        // create a new_edge between arcs lower_neighbor.lower_neighbor and upper_neighbor.upper_neighbor
+        let new_edge = Edge {
+            ray: new_ray,
+            lower_child: edge_to_be_replaced.lower_child,
+            upper_child: edge_to_be_replaced.upper_child,
+            parent: edge_to_be_replaced.parent,
+        };
+        // replace upper_edge with new_edge
+        let mut new_edge_slot_builder = Slot::builder();
+        new_edge_slot_builder.lower_neighbor = Some(lower_arc_slot_id);
+        new_edge_slot_builder.upper_neighbor = Some(upper_arc_slot_id);
+        new_edge_slot_builder.value = Some(Node::Edge(new_edge));
+
+        match &mut self
+            .nodes
+            .get_mut(&edge_to_be_replaced.lower_child)
+            .unwrap()
+            .value
+        {
+            Node::Arc(arc) => arc.parent = Some(new_edge_slot_builder.id),
+            Node::Edge(edge) => edge.parent = Some(new_edge_slot_builder.id),
+        };
+
+        match &mut self
+            .nodes
+            .get_mut(&edge_to_be_replaced.upper_child)
+            .unwrap()
+            .value
+        {
+            Node::Arc(arc) => arc.parent = Some(new_edge_slot_builder.id),
+            Node::Edge(edge) => edge.parent = Some(new_edge_slot_builder.id),
+        };
+
+        match edge_to_be_replaced.parent {
+            Some(parent_id) => {
+                let parent_slot = self.nodes.get_mut(&parent_id).unwrap();
+                let mut parent_edge = parent_slot.value.get_edge().unwrap();
+                if parent_edge.lower_child == edge_slot_id_to_replace {
+                    parent_edge.lower_child = new_edge_slot_builder.id;
+                } else if parent_edge.upper_child == edge_slot_id_to_replace {
+                    parent_edge.upper_child = new_edge_slot_builder.id;
+                } else {
+                    panic!("This should not be.")
+                }
+                parent_slot.value = Node::Edge(parent_edge);
+            }
+            None => self.root = Some(new_edge_slot_builder.id),
+        }
+        self.nodes
+            .insert(new_edge_slot_builder.id, new_edge_slot_builder.build());
+        // fix neighbors
+        let lower_arc_slot_mut = self.nodes.get_mut(&lower_arc_slot_id).unwrap();
+        lower_arc_slot_mut.upper_neighbor = Some(new_edge_slot_builder.id);
+        let upper_arc_slot_mut = self.nodes.get_mut(&upper_arc_slot_id).unwrap();
+        upper_arc_slot_mut.lower_neighbor = Some(new_edge_slot_builder.id);
         let mut arcs_to_check = vec![];
         match self.nodes[&lower_edge_slot_id].lower_neighbor {
             Some(lower_arc_slot_id) => {
