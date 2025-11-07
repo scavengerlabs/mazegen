@@ -305,8 +305,7 @@ impl Beachline {
         let parent_id = old_node.get_parent_id();
         match parent_id {
             Some(parent_id) => {
-                let parent_slot = self.nodes.get_mut(&parent_id).unwrap();
-                let parent_edge = parent_slot.value.get_mut_edge().unwrap();
+                let parent_edge = self.get_mut_edge(&parent_id);
                 if parent_edge.lower_child == old_id {
                     parent_edge.lower_child = new_id;
                 } else if parent_edge.upper_child == old_id {
@@ -333,17 +332,27 @@ impl Beachline {
         }
     }
 
+    fn get_mut_edge(&mut self, slot_id: &u32) -> &mut Edge {
+        let slot = self.nodes.get_mut(&slot_id).unwrap();
+        return slot.value.get_mut_edge().unwrap();
+    }
+
+    fn get_arc(&self, slot_id: &u32) -> Arc {
+        let slot = &self.nodes[&slot_id];
+        return slot.value.get_arc().unwrap();
+    }
+
+    fn get_mut_parent_id(&mut self, slot_id: &u32) -> &mut Option<u32> {
+        return self.nodes.get_mut(slot_id).unwrap().get_mut_parent_id();
+    }
+
     // each edge corresponds to a y value where two arcs collide
     pub fn remove_arc(&mut self, target_arc_slot_id: u32, directrix: f32) -> Vec<u32> {
         if !self.nodes.contains_key(&target_arc_slot_id) {
             return vec![];
         }
         let target_arc_slot = &self.nodes[&target_arc_slot_id];
-        let target_arc = target_arc_slot.value.get_arc().unwrap();
-        if !matches!(target_arc_slot.value, Node::Arc(_)) {
-            // just pass?
-            return vec![];
-        }
+        let target_arc = self.get_arc(&target_arc_slot_id);
         // for a circle event, edges should exist on both sides
         let lower_edge_slot = &self.nodes[&target_arc_slot.lower_neighbor.unwrap()];
         let upper_edge_slot = &self.nodes[&target_arc_slot.upper_neighbor.unwrap()];
@@ -403,17 +412,13 @@ impl Beachline {
             } else {
                 panic!("Impossible!");
             };
-        match parent_slot_id {
-            Some(parent_slot_id) => {
-                let parent_slot = self.nodes.get_mut(&parent_slot_id).unwrap();
-                let parent_edge = parent_slot.value.get_mut_edge().unwrap();
-                if parent_edge.lower_child == edge_slot_id_to_remove {
-                    parent_edge.lower_child = new_child_slot_id;
-                } else if parent_edge.upper_child == edge_slot_id_to_remove {
-                    parent_edge.upper_child = new_child_slot_id;
-                }
+        if let Some(parent_slot_id) = parent_slot_id {
+            let parent_edge = self.get_mut_edge(&parent_slot_id);
+            if parent_edge.lower_child == edge_slot_id_to_remove {
+                parent_edge.lower_child = new_child_slot_id;
+            } else if parent_edge.upper_child == edge_slot_id_to_remove {
+                parent_edge.upper_child = new_child_slot_id;
             }
-            None => {}
         }
         let new_child_slot = self.nodes.get_mut(&new_child_slot_id).unwrap();
         match new_child_slot.value {
@@ -440,21 +445,12 @@ impl Beachline {
         new_edge_slot_builder.upper_neighbor = Some(upper_arc_slot_id);
         new_edge_slot_builder.value = Some(Node::Edge(new_edge));
 
-        *self
-            .nodes
-            .get_mut(&edge_to_be_replaced.lower_child)
-            .unwrap()
-            .get_mut_parent_id() = Some(new_edge_slot_builder.id);
+        *self.get_mut_parent_id(&edge_to_be_replaced.lower_child) = Some(new_edge_slot_builder.id);
 
-        *self
-            .nodes
-            .get_mut(&edge_to_be_replaced.upper_child)
-            .unwrap()
-            .get_mut_parent_id() = Some(new_edge_slot_builder.id);
+        *self.get_mut_parent_id(&edge_to_be_replaced.upper_child) = Some(new_edge_slot_builder.id);
 
         self.replace_slot(edge_slot_id_to_replace, new_edge_slot_builder.id);
-        self.nodes
-            .insert(new_edge_slot_builder.id, new_edge_slot_builder.build());
+        self.add_slot(new_edge_slot_builder);
         // fix neighbors
         let lower_arc_slot_mut = self.nodes.get_mut(&lower_arc_slot_id).unwrap();
         lower_arc_slot_mut.upper_neighbor = Some(new_edge_slot_builder.id);
@@ -555,9 +551,8 @@ impl Beachline {
             let mut new_arc_slot_builder = Slot::builder();
             let new_arc = Arc::new(site.location, None);
             new_arc_slot_builder.value = Some(Node::Arc(new_arc));
-            let new_arc_slot = new_arc_slot_builder.build();
-            self.root = Some(new_arc_slot.id);
-            self.nodes.insert(new_arc_slot.id, new_arc_slot);
+            self.root = Some(new_arc_slot_builder.id);
+            self.add_slot(new_arc_slot_builder);
             return vec![];
         }
         // get arc and slot that will be replaced with new subtree
