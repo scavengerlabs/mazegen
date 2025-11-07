@@ -9,8 +9,12 @@ use svg::node::element::path::Data;
 use svg::node::element::Circle;
 use svg::node::element::Path;
 use svg::Document;
+
 #[path = "geometry.rs"]
 mod geometry;
+
+#[path = "clipper.rs"]
+mod clipper;
 
 #[derive(Debug)]
 struct Slot {
@@ -27,6 +31,19 @@ fn generate_id() -> u32 {
 }
 
 impl Slot {
+    pub fn get_parent_id(&self) -> Option<u32> {
+        return match self.value {
+            Node::Arc(arc) => arc.parent,
+            Node::Edge(edge) => edge.parent,
+        };
+    }
+    pub fn get_mut_parent_id(&mut self) -> &mut Option<u32> {
+        return match &mut self.value {
+            Node::Arc(ref mut arc) => &mut arc.parent,
+            Node::Edge(ref mut edge) => &mut edge.parent,
+        };
+    }
+
     pub fn seq_str(&self, beachline: &Beachline) -> String {
         let upper_str = match self.upper_neighbor {
             Some(upper_neighbor_id) => {
@@ -152,6 +169,13 @@ impl Node {
             Node::Arc(_) => None,
         };
     }
+
+    pub fn get_mut_edge(&mut self) -> Option<&mut Edge> {
+        return match self {
+            Node::Edge(ref mut edge) => Some(edge),
+            Node::Arc(_) => None,
+        };
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -255,6 +279,25 @@ impl Beachline {
         }
     }
 
+    fn replace_slot(&mut self, old_id: u32, new_id: u32) {
+        let old_node = &self.nodes[&old_id];
+        let parent_id = old_node.get_parent_id();
+        match parent_id {
+            Some(parent_id) => {
+                let parent_slot = self.nodes.get_mut(&parent_id).unwrap();
+                let parent_edge = parent_slot.value.get_mut_edge().unwrap();
+                if parent_edge.lower_child == old_id {
+                    parent_edge.lower_child = new_id;
+                } else if parent_edge.upper_child == old_id {
+                    parent_edge.upper_child = new_id;
+                } else {
+                    panic!("This should not be.")
+                }
+            }
+            None => self.root = Some(new_id),
+        }
+    }
+
     // each edge corresponds to a y value where two arcs collide
     pub fn remove_arc(&mut self, target_arc_slot_id: u32, directrix: f32) -> Vec<u32> {
         if !self.nodes.contains_key(&target_arc_slot_id) {
@@ -328,26 +371,22 @@ impl Beachline {
         match parent_slot_id {
             Some(parent_slot_id) => {
                 let parent_slot = self.nodes.get_mut(&parent_slot_id).unwrap();
-                let mut parent_edge = parent_slot.value.get_edge().unwrap();
+                let parent_edge = parent_slot.value.get_mut_edge().unwrap();
                 if parent_edge.lower_child == edge_slot_id_to_remove {
                     parent_edge.lower_child = new_child_slot_id;
                 } else if parent_edge.upper_child == edge_slot_id_to_remove {
                     parent_edge.upper_child = new_child_slot_id;
                 }
-                // reassign edge to slot
-                parent_slot.value = Node::Edge(parent_edge);
             }
             None => {}
         }
         let new_child_slot = self.nodes.get_mut(&new_child_slot_id).unwrap();
         match new_child_slot.value {
-            Node::Arc(mut new_child_mut) => {
+            Node::Arc(ref mut new_child_mut) => {
                 new_child_mut.parent = parent_slot_id;
-                new_child_slot.value = Node::Arc(new_child_mut);
             }
-            Node::Edge(mut new_child_mut) => {
+            Node::Edge(ref mut new_child_mut) => {
                 new_child_mut.parent = parent_slot_id;
-                new_child_slot.value = Node::Edge(new_child_mut);
             }
         }
         // fetch upper_edge anew because we've modified self.nodes
@@ -366,41 +405,19 @@ impl Beachline {
         new_edge_slot_builder.upper_neighbor = Some(upper_arc_slot_id);
         new_edge_slot_builder.value = Some(Node::Edge(new_edge));
 
-        match &mut self
+        *self
             .nodes
             .get_mut(&edge_to_be_replaced.lower_child)
             .unwrap()
-            .value
-        {
-            Node::Arc(arc) => arc.parent = Some(new_edge_slot_builder.id),
-            Node::Edge(edge) => edge.parent = Some(new_edge_slot_builder.id),
-        };
+            .get_mut_parent_id() = Some(new_edge_slot_builder.id);
 
-        match &mut self
+        *self
             .nodes
             .get_mut(&edge_to_be_replaced.upper_child)
             .unwrap()
-            .value
-        {
-            Node::Arc(arc) => arc.parent = Some(new_edge_slot_builder.id),
-            Node::Edge(edge) => edge.parent = Some(new_edge_slot_builder.id),
-        };
+            .get_mut_parent_id() = Some(new_edge_slot_builder.id);
 
-        match edge_to_be_replaced.parent {
-            Some(parent_id) => {
-                let parent_slot = self.nodes.get_mut(&parent_id).unwrap();
-                let mut parent_edge = parent_slot.value.get_edge().unwrap();
-                if parent_edge.lower_child == edge_slot_id_to_replace {
-                    parent_edge.lower_child = new_edge_slot_builder.id;
-                } else if parent_edge.upper_child == edge_slot_id_to_replace {
-                    parent_edge.upper_child = new_edge_slot_builder.id;
-                } else {
-                    panic!("This should not be.")
-                }
-                parent_slot.value = Node::Edge(parent_edge);
-            }
-            None => self.root = Some(new_edge_slot_builder.id),
-        }
+        self.replace_slot(edge_slot_id_to_replace, new_edge_slot_builder.id);
         self.nodes
             .insert(new_edge_slot_builder.id, new_edge_slot_builder.build());
         // fix neighbors
@@ -434,6 +451,9 @@ impl Beachline {
             .push(lower_edge.to_line_segment(lower_length));
         self.complete_edges
             .push(upper_edge.to_line_segment(upper_length));
+        // let target_cell_edges = self.cell_edges.get_mut(target_site_id);
+        // target_cell_edges.push(lower_edge_id);
+        // target_cell_edges.push(upper_edge_id);
         return arcs_to_check;
     }
 
@@ -503,7 +523,7 @@ impl Beachline {
         }
         // get arc and slot that will be replaced with new subtree
         let target_slot_id = self.get_slot_id_at(&self.nodes[&self.root.unwrap()], &site.location);
-        let target_slot = self.nodes.get_mut(&target_slot_id).unwrap();
+        let target_slot = &self.nodes[&target_slot_id];
         let target_arc = target_slot.value.get_arc().unwrap();
 
         // geometry
@@ -529,13 +549,14 @@ impl Beachline {
         let mut new_arc_slot_builder = Slot::builder();
         let mut top_arc_slot_builder = Slot::builder();
         let mut bottom_edge_slot_builder = Slot::builder();
+        let mut top_edge_slot_builder = Slot::builder();
 
         // create new arcs
         let bottom_arc = Arc::new(target_arc.focus, Some(bottom_edge_slot_builder.id));
         bottom_arc_slot_builder.value = Some(Node::Arc(bottom_arc));
         let new_arc = Arc::new(site.location, Some(bottom_edge_slot_builder.id));
         new_arc_slot_builder.value = Some(Node::Arc(new_arc));
-        let top_arc = Arc::new(target_arc.focus, Some(target_slot_id));
+        let top_arc = Arc::new(target_arc.focus, Some(top_edge_slot_builder.id));
         top_arc_slot_builder.value = Some(Node::Arc(top_arc));
 
         // create new edges
@@ -543,7 +564,7 @@ impl Beachline {
             ray: down_ray,
             lower_child: bottom_arc_slot_builder.id,
             upper_child: new_arc_slot_builder.id,
-            parent: Some(target_slot_id),
+            parent: Some(top_edge_slot_builder.id),
         };
         bottom_edge_slot_builder.value = Some(Node::Edge(bottom_edge));
         let top_edge = Edge {
@@ -557,11 +578,11 @@ impl Beachline {
         let target_slot_lower_neighbor_id = target_slot.lower_neighbor;
         // assign neighbors
         top_arc_slot_builder.upper_neighbor = target_slot_upper_neighbor_id;
-        top_arc_slot_builder.lower_neighbor = Some(target_slot_id);
+        top_arc_slot_builder.lower_neighbor = Some(top_edge_slot_builder.id);
         // target slot becomes "top edge"
-        target_slot.upper_neighbor = Some(top_arc_slot_builder.id);
-        target_slot.lower_neighbor = Some(new_arc_slot_builder.id);
-        new_arc_slot_builder.upper_neighbor = Some(target_slot_id);
+        top_edge_slot_builder.upper_neighbor = Some(top_arc_slot_builder.id);
+        top_edge_slot_builder.lower_neighbor = Some(new_arc_slot_builder.id);
+        new_arc_slot_builder.upper_neighbor = Some(top_edge_slot_builder.id);
         new_arc_slot_builder.lower_neighbor = Some(bottom_edge_slot_builder.id);
         bottom_edge_slot_builder.upper_neighbor = Some(new_arc_slot_builder.id);
         bottom_edge_slot_builder.lower_neighbor = Some(bottom_arc_slot_builder.id);
@@ -569,7 +590,7 @@ impl Beachline {
         bottom_arc_slot_builder.lower_neighbor = target_slot_lower_neighbor_id;
 
         // attach new subtree
-        target_slot.value = Node::Edge(top_edge);
+        top_edge_slot_builder.value = Some(Node::Edge(top_edge));
         self.nodes
             .insert(top_arc_slot_builder.id, top_arc_slot_builder.build());
         self.nodes
@@ -580,6 +601,9 @@ impl Beachline {
         );
         self.nodes
             .insert(bottom_arc_slot_builder.id, bottom_arc_slot_builder.build());
+        self.nodes
+            .insert(top_edge_slot_builder.id, top_edge_slot_builder.build());
+        self.replace_slot(target_slot_id, top_edge_slot_builder.id);
 
         // fix neighbor links around inserted subtree
         match target_slot_upper_neighbor_id {
@@ -776,7 +800,7 @@ fn fortunes(sites: Vec<Site>, boundaries: &Polyline) -> Beachline {
     return beachline;
 }
 
-fn get_path_from_points(start: &Point, end: &Point, color: &str) -> Path {
+fn get_path_from_points(start: &Point, end: &Point, color: &str, width: f32) -> Path {
     let data = Data::new()
         .move_to((start.x, start.y))
         .line_by((end.x - start.x, end.y - start.y))
@@ -785,13 +809,13 @@ fn get_path_from_points(start: &Point, end: &Point, color: &str) -> Path {
     return Path::new()
         .set("fill", "none")
         .set("stroke", color)
-        .set("stroke-width", 0.1)
+        .set("stroke-width", width)
         .set("opacity", 0.3)
         .set("d", data);
 }
 
-fn plot(beachline: &Beachline, boundaries: &Polyline) {
-    let mut document = Document::new().set("viewBox", (-2, -2, 4, 4));
+fn plot(beachline: &Beachline, boundaries: &Polyline, width: f32) {
+    let mut document = Document::new().set("viewBox", (-2.5, -2.5, 5, 5));
 
     for idx in 0..boundaries.points.len() - 1 {
         let start = boundaries.points[idx];
@@ -804,7 +828,7 @@ fn plot(beachline: &Beachline, boundaries: &Polyline) {
         let path = Path::new()
             .set("fill", "none")
             .set("stroke", "black")
-            .set("stroke-width", 0.1)
+            .set("stroke-width", width)
             .set("d", data);
 
         document = document.add(path);
@@ -818,7 +842,7 @@ fn plot(beachline: &Beachline, boundaries: &Polyline) {
                     .set("opacity", 0.3)
                     .set("cx", arc.focus.x)
                     .set("cy", arc.focus.y)
-                    .set("r", 0.1);
+                    .set("r", width);
 
                 document = document.add(path);
             }
@@ -827,7 +851,7 @@ fn plot(beachline: &Beachline, boundaries: &Polyline) {
     }
 
     for segment in &beachline.complete_edges {
-        let path = get_path_from_points(&segment.first, &segment.second, "green");
+        let path = get_path_from_points(&segment.first, &segment.second, "green", width);
         document = document.add(path);
     }
 
@@ -837,7 +861,7 @@ fn plot(beachline: &Beachline, boundaries: &Polyline) {
             .set("opacity", 0.3)
             .set("cx", point.x)
             .set("cy", point.y)
-            .set("r", 0.1);
+            .set("r", width);
 
         document = document.add(path);
     }
@@ -858,7 +882,7 @@ fn run_fortunes(points: Vec<(f32, f32)>, boundary_points: Vec<(f32, f32)>) -> Ve
 
     let beachline = fortunes(sites, &boundaries);
 
-    plot(&beachline, &boundaries);
+    plot(&beachline, &boundaries, 0.05);
 
     return beachline.complete_edges;
 }
@@ -870,7 +894,7 @@ mod tests;
 fn main() {
     let mut rng = rand::rng();
     let mut sites = vec![];
-    let num_sites = 20;
+    let num_sites = 100;
 
     for _ in 0..num_sites {
         sites.push((rng.random::<f32>() * 4. - 2., rng.random::<f32>() * 4. - 2.));

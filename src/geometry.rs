@@ -53,12 +53,32 @@ impl LineSegment {
         return ((self.first.x - self.second.x).powi(2) + (self.first.y - self.second.y).powi(2))
             .sqrt();
     }
+
     pub fn intersection(&self, ray: Ray) -> Option<Point> {
         let segment_ray = Ray {
             start: self.first,
             direction: Direction::new(self.second.x - self.first.x, self.second.y - self.first.y),
         };
         match ray.intersection(segment_ray) {
+            Some(ray_intersection) => {
+                let segment_ray_length = segment_ray.project(&ray_intersection);
+                if segment_ray_length > self.length() {
+                    return None;
+                }
+                return Some(ray_intersection);
+            }
+            None => {
+                return None;
+            }
+        }
+    }
+
+    pub fn intersection_with_line(&self, line: Line) -> Option<Point> {
+        let segment_ray = Ray {
+            start: self.first,
+            direction: Direction::new(self.second.x - self.first.x, self.second.y - self.first.y),
+        };
+        match line.intersection(segment_ray) {
             Some(ray_intersection) => {
                 let segment_ray_length = segment_ray.project(&ray_intersection);
                 if segment_ray_length > self.length() {
@@ -174,6 +194,34 @@ impl Neg for Direction {
 }
 
 #[derive(Copy, Clone, Debug)]
+pub struct Line {
+    pub start: Point,
+    pub direction: Direction,
+}
+
+impl Line {
+    pub fn intersection(&self, other: Ray) -> Option<Point> {
+        let det = self.direction.x * (-other.direction.y) - (-other.direction.x) * self.direction.y;
+        if det == 0.0 {
+            return None;
+        }
+        let t_1 = ((other.start.x - self.start.x) * (-other.direction.y)
+            - (-other.direction.x) * (other.start.y - self.start.y))
+            / det;
+        let t_2 = (self.direction.x * (other.start.y - self.start.y)
+            - (other.start.x - self.start.x) * self.direction.y)
+            / det;
+        if t_2 < 0.0 {
+            return None;
+        }
+        return Some(Point {
+            x: self.start.x + self.direction.x * t_1,
+            y: self.start.y + self.direction.y * t_1,
+        });
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
 pub struct Ray {
     pub start: Point,
     pub direction: Direction,
@@ -182,6 +230,17 @@ pub struct Ray {
 impl fmt::Display for Ray {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}-{}->", self.start, self.direction)
+    }
+}
+
+impl Neg for Ray {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        return Ray {
+            start: self.start,
+            direction: -self.direction,
+        };
     }
 }
 
