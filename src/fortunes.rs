@@ -199,6 +199,16 @@ impl Edge {
             second: second,
         };
     }
+
+    pub fn replace_child(&mut self, old_child_id: u32, new_child_id: u32) {
+        if self.lower_child == old_child_id {
+            self.lower_child = new_child_id;
+        } else if self.upper_child == old_child_id {
+            self.upper_child = new_child_id;
+        } else {
+            panic!("The old child is not here.")
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -318,18 +328,14 @@ impl Beachline {
         }
     }
 
-    fn assign_lower_neighbor(&mut self, target_id: Option<u32>, lower_neighbor_id: u32) {
-        if let Some(id) = target_id {
-            let target = self.nodes.get_mut(&id).unwrap();
-            target.lower_neighbor = Some(lower_neighbor_id);
-        }
+    fn assign_lower_neighbor(&mut self, target_id: u32, lower_neighbor_id: u32) {
+        let target = self.nodes.get_mut(&target_id).unwrap();
+        target.lower_neighbor = Some(lower_neighbor_id);
     }
 
-    fn assign_upper_neighbor(&mut self, target_id: Option<u32>, upper_neighbor_id: u32) {
-        if let Some(id) = target_id {
-            let target = self.nodes.get_mut(&id).unwrap();
-            target.upper_neighbor = Some(upper_neighbor_id);
-        }
+    fn assign_upper_neighbor(&mut self, target_id: u32, upper_neighbor_id: u32) {
+        let target = self.nodes.get_mut(&target_id).unwrap();
+        target.upper_neighbor = Some(upper_neighbor_id);
     }
 
     fn get_mut_edge(&mut self, slot_id: &u32) -> &mut Edge {
@@ -337,9 +343,14 @@ impl Beachline {
         return slot.value.get_mut_edge().unwrap();
     }
 
-    fn get_arc(&self, slot_id: &u32) -> Arc {
+    fn get_arc(&self, slot_id: &u32) -> Option<Arc> {
         let slot = &self.nodes[&slot_id];
-        return slot.value.get_arc().unwrap();
+        return slot.value.get_arc();
+    }
+
+    fn get_edge(&self, slot_id: &u32) -> Option<Edge> {
+        let slot = &self.nodes[&slot_id];
+        return slot.value.get_edge();
     }
 
     fn get_mut_parent_id(&mut self, slot_id: &u32) -> &mut Option<u32> {
@@ -352,7 +363,7 @@ impl Beachline {
             return vec![];
         }
         let target_arc_slot = &self.nodes[&target_arc_slot_id];
-        let target_arc = self.get_arc(&target_arc_slot_id);
+        let target_arc = self.get_arc(&target_arc_slot_id).unwrap();
         // for a circle event, edges should exist on both sides
         let lower_edge_slot = &self.nodes[&target_arc_slot.lower_neighbor.unwrap()];
         let upper_edge_slot = &self.nodes[&target_arc_slot.upper_neighbor.unwrap()];
@@ -414,42 +425,26 @@ impl Beachline {
             };
         if let Some(parent_slot_id) = parent_slot_id {
             let parent_edge = self.get_mut_edge(&parent_slot_id);
-            if parent_edge.lower_child == edge_slot_id_to_remove {
-                parent_edge.lower_child = new_child_slot_id;
-            } else if parent_edge.upper_child == edge_slot_id_to_remove {
-                parent_edge.upper_child = new_child_slot_id;
-            }
+            parent_edge.replace_child(edge_slot_id_to_remove, new_child_slot_id);
         }
-        let new_child_slot = self.nodes.get_mut(&new_child_slot_id).unwrap();
-        match new_child_slot.value {
-            Node::Arc(ref mut new_child_mut) => {
-                new_child_mut.parent = parent_slot_id;
-            }
-            Node::Edge(ref mut new_child_mut) => {
-                new_child_mut.parent = parent_slot_id;
-            }
-        }
-        // fetch upper_edge anew because we've modified self.nodes
-        let edge_slot_to_be_replaced = &self.nodes[&edge_slot_id_to_replace];
-        let edge_to_be_replaced = &edge_slot_to_be_replaced.value.get_edge().unwrap();
-        // create a new_edge between arcs lower_neighbor.lower_neighbor and upper_neighbor.upper_neighbor
+        *self.get_mut_parent_id(&new_child_slot_id) = parent_slot_id;
+
+        let edge_to_replace = self.get_edge(&edge_slot_id_to_replace).unwrap();
         let new_edge = Edge {
             ray: new_ray,
-            lower_child: edge_to_be_replaced.lower_child,
-            upper_child: edge_to_be_replaced.upper_child,
-            parent: edge_to_be_replaced.parent,
+            lower_child: edge_to_replace.lower_child,
+            upper_child: edge_to_replace.upper_child,
+            parent: edge_to_replace.parent,
         };
-        // replace upper_edge with new_edge
         let mut new_edge_slot_builder = Slot::builder();
         new_edge_slot_builder.lower_neighbor = Some(lower_arc_slot_id);
         new_edge_slot_builder.upper_neighbor = Some(upper_arc_slot_id);
         new_edge_slot_builder.value = Some(Node::Edge(new_edge));
 
-        *self.get_mut_parent_id(&edge_to_be_replaced.lower_child) = Some(new_edge_slot_builder.id);
-
-        *self.get_mut_parent_id(&edge_to_be_replaced.upper_child) = Some(new_edge_slot_builder.id);
-
+        *self.get_mut_parent_id(&edge_to_replace.lower_child) = Some(new_edge_slot_builder.id);
+        *self.get_mut_parent_id(&edge_to_replace.upper_child) = Some(new_edge_slot_builder.id);
         self.replace_slot(edge_slot_id_to_replace, new_edge_slot_builder.id);
+
         self.add_slot(new_edge_slot_builder);
         // fix neighbors
         let lower_arc_slot_mut = self.nodes.get_mut(&lower_arc_slot_id).unwrap();
@@ -457,17 +452,11 @@ impl Beachline {
         let upper_arc_slot_mut = self.nodes.get_mut(&upper_arc_slot_id).unwrap();
         upper_arc_slot_mut.lower_neighbor = Some(new_edge_slot_builder.id);
         let mut arcs_to_check = vec![];
-        match self.nodes[&lower_edge_slot_id].lower_neighbor {
-            Some(lower_arc_slot_id) => {
-                arcs_to_check.push(lower_arc_slot_id);
-            }
-            None => {}
+        if let Some(lower_arc_slot_id) = self.nodes[&lower_edge_slot_id].lower_neighbor {
+            arcs_to_check.push(lower_arc_slot_id);
         }
-        match self.nodes[&upper_edge_slot_id].upper_neighbor {
-            Some(upper_arc_slot_id) => {
-                arcs_to_check.push(upper_arc_slot_id);
-            }
-            None => {}
+        if let Some(upper_arc_slot_id) = self.nodes[&upper_edge_slot_id].upper_neighbor {
+            arcs_to_check.push(upper_arc_slot_id);
         }
         // remove obsolete edges
         self.nodes.remove(&lower_edge_slot_id);
@@ -617,8 +606,12 @@ impl Beachline {
         self.replace_slot(target_slot_id, top_edge_slot_builder.id);
 
         // fix neighbor links around inserted subtree
-        self.assign_lower_neighbor(target_slot_upper_neighbor_id, top_arc_slot_builder.id);
-        self.assign_upper_neighbor(target_slot_lower_neighbor_id, bottom_arc_slot_builder.id);
+        if let Some(id) = target_slot_upper_neighbor_id {
+            self.assign_lower_neighbor(id, top_arc_slot_builder.id);
+        }
+        if let Some(id) = target_slot_lower_neighbor_id {
+            self.assign_upper_neighbor(id, bottom_arc_slot_builder.id);
+        }
 
         return vec![bottom_arc_slot_builder.id, top_arc_slot_builder.id];
     }
