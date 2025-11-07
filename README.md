@@ -12,6 +12,12 @@ python -m http.server
 
 navigate to localhost:8000/index.html
 
+## Test
+
+```bash
+cargo test
+```
+
 ## Run Fortune's algorithm
 
 ```bash
