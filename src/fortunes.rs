@@ -224,6 +224,26 @@ impl Arc {
             directrix: directrix,
         };
     }
+
+    pub fn split(&self, site: &Site) -> (Ray, Ray) {
+        let ray = Ray {
+            start: site.location,
+            direction: Direction::new(-1.0, 0.0),
+        };
+        let site_to_arc_ray_start = self.intersection(&ray, site.location.x).unwrap();
+        let parabola = self.get_parabola(site.location.x);
+        let up_tangent = parabola.tangent_at(&site_to_arc_ray_start);
+        let down_tangent = -up_tangent;
+        let up_ray = Ray {
+            start: site_to_arc_ray_start,
+            direction: up_tangent,
+        };
+        let down_ray = Ray {
+            start: site_to_arc_ray_start,
+            direction: down_tangent,
+        };
+        return (up_ray, down_ray);
+    }
 }
 
 #[derive(Debug)]
@@ -527,22 +547,7 @@ impl Beachline {
         let target_arc = target_slot.value.get_arc().unwrap();
 
         // geometry
-        let ray = Ray {
-            start: site.location,
-            direction: Direction::new(-1.0, 0.0),
-        };
-        let site_to_arc_ray_start = target_arc.intersection(&ray, site.location.x).unwrap();
-        let parabola = target_arc.get_parabola(site.location.x);
-        let up_tangent = parabola.tangent_at(&site_to_arc_ray_start);
-        let down_tangent = -up_tangent;
-        let up_ray = Ray {
-            start: site_to_arc_ray_start,
-            direction: up_tangent,
-        };
-        let down_ray = Ray {
-            start: site_to_arc_ray_start,
-            direction: down_tangent,
-        };
+        let (up_ray, down_ray) = target_arc.split(site);
 
         // create all slot builders; assigns IDs
         let mut bottom_arc_slot_builder = Slot::builder();
