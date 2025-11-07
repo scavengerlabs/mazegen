@@ -367,15 +367,13 @@ impl Beachline {
         // for a circle event, edges should exist on both sides
         let lower_edge_slot = &self.nodes[&target_arc_slot.lower_neighbor.unwrap()];
         let upper_edge_slot = &self.nodes[&target_arc_slot.upper_neighbor.unwrap()];
-        let lower_edge_slot_id = lower_edge_slot.id;
-        let upper_edge_slot_id = upper_edge_slot.id;
-        let lower_arc_slot = &self.nodes[&lower_edge_slot.lower_neighbor.unwrap()];
-        let upper_arc_slot = &self.nodes[&upper_edge_slot.upper_neighbor.unwrap()];
-        let lower_arc_slot_id = lower_arc_slot.id;
-        let upper_arc_slot_id = upper_arc_slot.id;
-        let lower_arc = lower_arc_slot.value.get_arc().unwrap();
+        let lower_edge_slot_id = target_arc_slot.lower_neighbor.unwrap();
+        let upper_edge_slot_id = target_arc_slot.upper_neighbor.unwrap();
+        let lower_arc_slot_id = lower_edge_slot.lower_neighbor.unwrap();
+        let upper_arc_slot_id = upper_edge_slot.upper_neighbor.unwrap();
+        let lower_arc = self.get_arc(&lower_arc_slot_id).unwrap();
         let lower_site = lower_arc.focus;
-        let upper_site = upper_arc_slot.value.get_arc().unwrap().focus;
+        let upper_site = self.get_arc(&upper_arc_slot_id).unwrap().focus;
         let lower_edge = &lower_edge_slot.value.get_edge().unwrap();
         let upper_edge = &upper_edge_slot.value.get_edge().unwrap();
         let new_start = lower_edge.ray.intersection(upper_edge.ray).unwrap();
@@ -481,8 +479,7 @@ impl Beachline {
         let target_arc_slot = &self.nodes[&arc_slot_id];
         match target_arc_slot.lower_neighbor {
             Some(id) => {
-                let lower_edge_slot = &self.nodes[&id];
-                return Some(lower_edge_slot.value.get_edge().unwrap());
+                return Some(self.get_edge(&id).unwrap());
             }
             None => {
                 return None;
