@@ -1,7 +1,7 @@
 ## Build
 
 ```bash
-wasm-pack build --target web
+RUSTFLAGS='--cfg getrandom_backend="wasm_js"' wasm-pack build --target web
 ```
 
 ## Serve
