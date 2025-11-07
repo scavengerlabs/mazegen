@@ -121,6 +121,7 @@ impl Slot {
     }
 }
 
+#[derive(Clone, Copy)]
 struct SlotBuilder {
     id: u32,
     value: Option<Node>,
@@ -315,6 +316,20 @@ impl Beachline {
                 }
             }
             None => self.root = Some(new_id),
+        }
+    }
+
+    fn assign_lower_neighbor(&mut self, target_id: Option<u32>, lower_neighbor_id: u32) {
+        if let Some(id) = target_id {
+            let target = self.nodes.get_mut(&id).unwrap();
+            target.lower_neighbor = Some(lower_neighbor_id);
+        }
+    }
+
+    fn assign_upper_neighbor(&mut self, target_id: Option<u32>, upper_neighbor_id: u32) {
+        if let Some(id) = target_id {
+            let target = self.nodes.get_mut(&id).unwrap();
+            target.upper_neighbor = Some(upper_neighbor_id);
         }
     }
 
@@ -531,6 +546,10 @@ impl Beachline {
         }
     }
 
+    fn add_slot(&mut self, slot_builder: SlotBuilder) {
+        self.nodes.insert(slot_builder.id, slot_builder.build());
+    }
+
     pub fn add_site(&mut self, site: &Site) -> Vec<u32> {
         if self.root.is_none() {
             let mut new_arc_slot_builder = Slot::builder();
@@ -545,9 +564,6 @@ impl Beachline {
         let target_slot_id = self.get_slot_id_at(&self.nodes[&self.root.unwrap()], &site.location);
         let target_slot = &self.nodes[&target_slot_id];
         let target_arc = target_slot.value.get_arc().unwrap();
-
-        // geometry
-        let (up_ray, down_ray) = target_arc.split(site);
 
         // create all slot builders; assigns IDs
         let mut bottom_arc_slot_builder = Slot::builder();
@@ -564,6 +580,9 @@ impl Beachline {
         let top_arc = Arc::new(target_arc.focus, Some(top_edge_slot_builder.id));
         top_arc_slot_builder.value = Some(Node::Arc(top_arc));
 
+        // geometry
+        let (up_ray, down_ray) = target_arc.split(site);
+
         // create new edges
         let bottom_edge = Edge {
             ray: down_ray,
@@ -576,15 +595,15 @@ impl Beachline {
             ray: up_ray,
             lower_child: bottom_edge_slot_builder.id,
             upper_child: top_arc_slot_builder.id,
-            parent: target_arc.parent,
+            parent: target_slot.get_parent_id(),
         };
+        top_edge_slot_builder.value = Some(Node::Edge(top_edge));
 
+        // assign neighbors
         let target_slot_upper_neighbor_id = target_slot.upper_neighbor;
         let target_slot_lower_neighbor_id = target_slot.lower_neighbor;
-        // assign neighbors
         top_arc_slot_builder.upper_neighbor = target_slot_upper_neighbor_id;
         top_arc_slot_builder.lower_neighbor = Some(top_edge_slot_builder.id);
-        // target slot becomes "top edge"
         top_edge_slot_builder.upper_neighbor = Some(top_arc_slot_builder.id);
         top_edge_slot_builder.lower_neighbor = Some(new_arc_slot_builder.id);
         new_arc_slot_builder.upper_neighbor = Some(top_edge_slot_builder.id);
@@ -595,36 +614,17 @@ impl Beachline {
         bottom_arc_slot_builder.lower_neighbor = target_slot_lower_neighbor_id;
 
         // attach new subtree
-        top_edge_slot_builder.value = Some(Node::Edge(top_edge));
-        self.nodes
-            .insert(top_arc_slot_builder.id, top_arc_slot_builder.build());
-        self.nodes
-            .insert(new_arc_slot_builder.id, new_arc_slot_builder.build());
-        self.nodes.insert(
-            bottom_edge_slot_builder.id,
-            bottom_edge_slot_builder.build(),
-        );
-        self.nodes
-            .insert(bottom_arc_slot_builder.id, bottom_arc_slot_builder.build());
-        self.nodes
-            .insert(top_edge_slot_builder.id, top_edge_slot_builder.build());
+        self.add_slot(top_arc_slot_builder);
+        self.add_slot(new_arc_slot_builder);
+        self.add_slot(bottom_edge_slot_builder);
+        self.add_slot(bottom_arc_slot_builder);
+        self.add_slot(top_edge_slot_builder);
         self.replace_slot(target_slot_id, top_edge_slot_builder.id);
 
         // fix neighbor links around inserted subtree
-        match target_slot_upper_neighbor_id {
-            Some(id) => {
-                let upper_neighbor = self.nodes.get_mut(&id).unwrap();
-                upper_neighbor.lower_neighbor = Some(top_arc_slot_builder.id);
-            }
-            None => {}
-        }
-        match target_slot_lower_neighbor_id {
-            Some(id) => {
-                let lower_neighbor = self.nodes.get_mut(&id).unwrap();
-                lower_neighbor.upper_neighbor = Some(bottom_arc_slot_builder.id);
-            }
-            None => {}
-        }
+        self.assign_lower_neighbor(target_slot_upper_neighbor_id, top_arc_slot_builder.id);
+        self.assign_upper_neighbor(target_slot_lower_neighbor_id, bottom_arc_slot_builder.id);
+
         return vec![bottom_arc_slot_builder.id, top_arc_slot_builder.id];
     }
 
