@@ -109,28 +109,6 @@ impl Polyline {
         return Polyline { points: vec![] };
     }
 
-    pub fn nearest_intersection(&self, ray: Ray) -> Option<Point> {
-        let mut output = None;
-        let mut min_distance = f32::MAX;
-        for idx in 0..self.points.len() - 1 {
-            let line_segment = LineSegment {
-                first: self.points[idx],
-                second: self.points[idx + 1],
-            };
-            match line_segment.intersection(ray) {
-                Some(point) => {
-                    let distance = ray.project(&point);
-                    if distance < min_distance {
-                        min_distance = distance;
-                        output = Some(point);
-                    }
-                }
-                None => {}
-            }
-        }
-        return output;
-    }
-
     pub fn furthest_intersection(&self, ray: Ray) -> Option<Point> {
         let mut output = None;
         let mut max_distance = f32::MIN;
@@ -252,13 +230,6 @@ impl Neg for Ray {
 }
 
 impl Ray {
-    pub fn get_endpoint(&self, length: f32) -> Point {
-        return Point::new(
-            self.start.x + self.direction.x * length,
-            self.start.y + self.direction.y * length,
-        );
-    }
-
     pub fn intersection(&self, other: Ray) -> Option<Point> {
         let det = self.direction.x * (-other.direction.y) - (-other.direction.x) * self.direction.y;
         if det == 0.0 {
