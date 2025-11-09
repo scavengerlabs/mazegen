@@ -22,6 +22,7 @@ struct Slot {
     value: Node,
     lower_neighbor: Option<u32>,
     upper_neighbor: Option<u32>,
+    parent: Option<u32>,
 }
 
 static GLOBAL_ID_COUNTER: AtomicU32 = AtomicU32::new(1);
@@ -32,16 +33,10 @@ fn generate_id() -> u32 {
 
 impl Slot {
     pub fn get_parent_id(&self) -> Option<u32> {
-        return match self.value {
-            Node::Arc(arc) => arc.parent,
-            Node::Edge(edge) => edge.parent,
-        };
+        return self.parent;
     }
     pub fn get_mut_parent_id(&mut self) -> &mut Option<u32> {
-        return match &mut self.value {
-            Node::Arc(ref mut arc) => &mut arc.parent,
-            Node::Edge(ref mut edge) => &mut edge.parent,
-        };
+        return &mut self.parent;
     }
 
     pub fn seq_str(&self, beachline: &Beachline) -> String {
@@ -127,6 +122,7 @@ struct SlotBuilder {
     value: Option<Node>,
     lower_neighbor: Option<u32>,
     upper_neighbor: Option<u32>,
+    parent: Option<u32>,
 }
 
 impl SlotBuilder {
@@ -136,6 +132,7 @@ impl SlotBuilder {
             value: None,
             lower_neighbor: None,
             upper_neighbor: None,
+            parent: None,
         };
     }
 
@@ -146,6 +143,7 @@ impl SlotBuilder {
             value: value,
             lower_neighbor: self.lower_neighbor,
             upper_neighbor: self.upper_neighbor,
+            parent: self.parent,
         };
     }
 }
@@ -184,7 +182,6 @@ struct Edge {
     ray: Ray,
     lower_child: u32,
     upper_child: u32,
-    parent: Option<u32>,
 }
 
 impl Edge {
@@ -214,15 +211,11 @@ impl Edge {
 #[derive(Copy, Clone, Debug)]
 struct Arc {
     focus: Point,
-    parent: Option<u32>,
 }
 
 impl Arc {
-    pub fn new(focus: Point, parent: Option<u32>) -> Self {
-        return Arc {
-            focus: focus,
-            parent: parent,
-        };
+    pub fn new(focus: Point) -> Self {
+        return Arc { focus: focus };
     }
 
     pub fn intersection(&self, ray: &Ray, directrix: f32) -> Option<Point> {
@@ -360,6 +353,10 @@ impl Beachline {
         return slot.value.get_edge();
     }
 
+    fn get_parent_id(&mut self, slot_id: &u32) -> Option<u32> {
+        return self.nodes[slot_id].get_parent_id();
+    }
+
     fn get_mut_parent_id(&mut self, slot_id: &u32) -> &mut Option<u32> {
         return self.nodes.get_mut(slot_id).unwrap().get_mut_parent_id();
     }
@@ -406,7 +403,7 @@ impl Beachline {
                 let edge_slot_id_to_remove = lower_edge_slot_id;
                 let edge_slot_id_to_replace = upper_edge_slot_id;
                 let new_child_slot_id = lower_edge.lower_child;
-                let parent_slot_id = lower_edge.parent;
+                let parent_slot_id = self.get_parent_id(&lower_edge_slot_id);
                 (
                     edge_slot_id_to_remove,
                     edge_slot_id_to_replace,
@@ -419,7 +416,7 @@ impl Beachline {
                 let edge_slot_id_to_remove = upper_edge_slot_id;
                 let edge_slot_id_to_replace = lower_edge_slot_id;
                 let new_child_slot_id = upper_edge.upper_child;
-                let parent_slot_id = upper_edge.parent;
+                let parent_slot_id = self.get_parent_id(&upper_edge_slot_id);
                 (
                     edge_slot_id_to_remove,
                     edge_slot_id_to_replace,
@@ -440,12 +437,12 @@ impl Beachline {
             ray: new_ray,
             lower_child: edge_to_replace.lower_child,
             upper_child: edge_to_replace.upper_child,
-            parent: edge_to_replace.parent,
         };
         let mut new_edge_slot_builder = Slot::builder();
         new_edge_slot_builder.lower_neighbor = Some(lower_arc_slot_id);
         new_edge_slot_builder.upper_neighbor = Some(upper_arc_slot_id);
         new_edge_slot_builder.value = Some(Node::Edge(new_edge));
+        new_edge_slot_builder.parent = self.get_parent_id(&edge_slot_id_to_replace);
 
         self.set_parent_id(&edge_to_replace.lower_child, Some(new_edge_slot_builder.id));
         self.set_parent_id(&edge_to_replace.upper_child, Some(new_edge_slot_builder.id));
@@ -544,7 +541,7 @@ impl Beachline {
     pub fn add_site(&mut self, site: &Site) -> Vec<u32> {
         if self.root.is_none() {
             let mut new_arc_slot_builder = Slot::builder();
-            let new_arc = Arc::new(site.location, None);
+            let new_arc = Arc::new(site.location);
             new_arc_slot_builder.value = Some(Node::Arc(new_arc));
             self.root = Some(new_arc_slot_builder.id);
             self.add_slot(new_arc_slot_builder);
@@ -563,12 +560,15 @@ impl Beachline {
         let mut top_edge_slot_builder = Slot::builder();
 
         // create new arcs
-        let bottom_arc = Arc::new(target_arc.focus, Some(bottom_edge_slot_builder.id));
+        let bottom_arc = Arc::new(target_arc.focus);
         bottom_arc_slot_builder.value = Some(Node::Arc(bottom_arc));
-        let new_arc = Arc::new(site.location, Some(bottom_edge_slot_builder.id));
+        bottom_arc_slot_builder.parent = Some(bottom_edge_slot_builder.id);
+        let new_arc = Arc::new(site.location);
         new_arc_slot_builder.value = Some(Node::Arc(new_arc));
-        let top_arc = Arc::new(target_arc.focus, Some(top_edge_slot_builder.id));
+        new_arc_slot_builder.parent = Some(bottom_edge_slot_builder.id);
+        let top_arc = Arc::new(target_arc.focus);
         top_arc_slot_builder.value = Some(Node::Arc(top_arc));
+        top_arc_slot_builder.parent = Some(top_edge_slot_builder.id);
 
         // geometry
         let (up_ray, down_ray) = target_arc.split(site);
@@ -578,16 +578,16 @@ impl Beachline {
             ray: down_ray,
             lower_child: bottom_arc_slot_builder.id,
             upper_child: new_arc_slot_builder.id,
-            parent: Some(top_edge_slot_builder.id),
         };
         bottom_edge_slot_builder.value = Some(Node::Edge(bottom_edge));
+        bottom_edge_slot_builder.parent = Some(top_edge_slot_builder.id);
         let top_edge = Edge {
             ray: up_ray,
             lower_child: bottom_edge_slot_builder.id,
             upper_child: top_arc_slot_builder.id,
-            parent: target_slot.get_parent_id(),
         };
         top_edge_slot_builder.value = Some(Node::Edge(top_edge));
+        top_edge_slot_builder.parent = target_slot.get_parent_id();
 
         // assign neighbors
         let target_slot_upper_neighbor_id = target_slot.upper_neighbor;
