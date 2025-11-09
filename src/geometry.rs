@@ -40,6 +40,13 @@ impl Point {
             return Direction::new(-dy, dx);
         }
     }
+
+    pub fn to_parabola(self, directrix: f32) -> Parabola {
+        return Parabola {
+            focus: self,
+            directrix: directrix,
+        };
+    }
 }
 
 #[derive(Debug)]

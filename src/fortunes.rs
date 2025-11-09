@@ -230,10 +230,7 @@ impl Arc {
     }
 
     pub fn get_parabola(&self, directrix: f32) -> Parabola {
-        return Parabola {
-            focus: self.focus,
-            directrix: directrix,
-        };
+        return self.focus.to_parabola(directrix);
     }
 
     pub fn split(&self, site: &Site) -> (Ray, Ray) {
@@ -328,6 +325,16 @@ impl Beachline {
         }
     }
 
+    fn get_lower_neighbor(&self, target_id: u32) -> Option<u32> {
+        let target = &self.nodes[&target_id];
+        return target.lower_neighbor;
+    }
+
+    fn get_upper_neighbor(&self, target_id: u32) -> Option<u32> {
+        let target = &self.nodes[&target_id];
+        return target.upper_neighbor;
+    }
+
     fn assign_lower_neighbor(&mut self, target_id: u32, lower_neighbor_id: u32) {
         let target = self.nodes.get_mut(&target_id).unwrap();
         target.lower_neighbor = Some(lower_neighbor_id);
@@ -357,28 +364,29 @@ impl Beachline {
         return self.nodes.get_mut(slot_id).unwrap().get_mut_parent_id();
     }
 
+    fn set_parent_id(&mut self, slot_id: &u32, parent_id: Option<u32>) {
+        *self.get_mut_parent_id(slot_id) = parent_id;
+    }
+
     // each edge corresponds to a y value where two arcs collide
     pub fn remove_arc(&mut self, target_arc_slot_id: u32, directrix: f32) -> Vec<u32> {
         if !self.nodes.contains_key(&target_arc_slot_id) {
             return vec![];
         }
-        let target_arc_slot = &self.nodes[&target_arc_slot_id];
-        let target_arc = self.get_arc(&target_arc_slot_id).unwrap();
         // for a circle event, edges should exist on both sides
-        let lower_edge_slot = &self.nodes[&target_arc_slot.lower_neighbor.unwrap()];
-        let upper_edge_slot = &self.nodes[&target_arc_slot.upper_neighbor.unwrap()];
-        let lower_edge_slot_id = target_arc_slot.lower_neighbor.unwrap();
-        let upper_edge_slot_id = target_arc_slot.upper_neighbor.unwrap();
-        let lower_arc_slot_id = lower_edge_slot.lower_neighbor.unwrap();
-        let upper_arc_slot_id = upper_edge_slot.upper_neighbor.unwrap();
-        let lower_arc = self.get_arc(&lower_arc_slot_id).unwrap();
-        let lower_site = lower_arc.focus;
+        let lower_edge_slot_id = self.get_lower_neighbor(target_arc_slot_id).unwrap();
+        let upper_edge_slot_id = self.get_upper_neighbor(target_arc_slot_id).unwrap();
+        let lower_arc_slot_id = self.get_lower_neighbor(lower_edge_slot_id).unwrap();
+        let upper_arc_slot_id = self.get_upper_neighbor(upper_edge_slot_id).unwrap();
+        let lower_edge_slot = &self.nodes[&lower_edge_slot_id];
+        let upper_edge_slot = &self.nodes[&upper_edge_slot_id];
+        let lower_site = self.get_arc(&lower_arc_slot_id).unwrap().focus;
         let upper_site = self.get_arc(&upper_arc_slot_id).unwrap().focus;
         let lower_edge = &lower_edge_slot.value.get_edge().unwrap();
         let upper_edge = &upper_edge_slot.value.get_edge().unwrap();
         let new_start = lower_edge.ray.intersection(upper_edge.ray).unwrap();
         let mut new_direction = lower_site.perpendicular(&upper_site);
-        let normal = lower_arc.get_parabola(directrix).normal(&new_start);
+        let normal = lower_site.to_parabola(directrix).normal(&new_start);
         let projection = normal.project(&Point {
             x: new_direction.x,
             y: new_direction.y,
@@ -425,7 +433,7 @@ impl Beachline {
             let parent_edge = self.get_mut_edge(&parent_slot_id);
             parent_edge.replace_child(edge_slot_id_to_remove, new_child_slot_id);
         }
-        *self.get_mut_parent_id(&new_child_slot_id) = parent_slot_id;
+        self.set_parent_id(&new_child_slot_id, parent_slot_id);
 
         let edge_to_replace = self.get_edge(&edge_slot_id_to_replace).unwrap();
         let new_edge = Edge {
@@ -439,8 +447,8 @@ impl Beachline {
         new_edge_slot_builder.upper_neighbor = Some(upper_arc_slot_id);
         new_edge_slot_builder.value = Some(Node::Edge(new_edge));
 
-        *self.get_mut_parent_id(&edge_to_replace.lower_child) = Some(new_edge_slot_builder.id);
-        *self.get_mut_parent_id(&edge_to_replace.upper_child) = Some(new_edge_slot_builder.id);
+        self.set_parent_id(&edge_to_replace.lower_child, Some(new_edge_slot_builder.id));
+        self.set_parent_id(&edge_to_replace.upper_child, Some(new_edge_slot_builder.id));
         self.replace_slot(edge_slot_id_to_replace, new_edge_slot_builder.id);
 
         self.add_slot(new_edge_slot_builder);
@@ -456,13 +464,14 @@ impl Beachline {
         if let Some(upper_arc_slot_id) = self.nodes[&upper_edge_slot_id].upper_neighbor {
             arcs_to_check.push(upper_arc_slot_id);
         }
+
+        let target_arc = self.get_arc(&target_arc_slot_id).unwrap();
+        self.complete_sites.push(target_arc.focus);
         // remove obsolete edges
         self.nodes.remove(&lower_edge_slot_id);
         self.nodes.remove(&upper_edge_slot_id);
         // remove obsolete node
         self.nodes.remove(&target_arc_slot_id);
-
-        self.complete_sites.push(target_arc.focus);
 
         let (lower_length, upper_length) = lower_edge.ray.terminate(upper_edge.ray).unwrap();
         self.complete_edges
