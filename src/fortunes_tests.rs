@@ -26,6 +26,39 @@ fn check_line_segments_close(first_segments: Vec<LineSegment>, second_segments: 
 }
 
 #[test]
+fn test_fortunes_split_arc_being_squeezed() {
+    let boundary_polyline = vec![
+        (-2.0, -2.0),
+        (-2.0, 2.0),
+        (2.0, 2.0),
+        (2.0, -2.0),
+        (-2.0, -2.0),
+    ];
+    let sites = vec![(-1.0, 0.0), (0.0, 1.0), (0.05, -1.0), (0.1, 0.1)];
+    let expected_edges = vec![
+        ((-0.45, 0.10), (-0.49, 0.49)),
+        ((-1.00, 1.00), (-0.49, 0.49)),
+        ((-0.95, -1.00), (-0.41, -0.43)),
+        ((-0.45, 0.10), (-0.41, -0.43)),
+        ((-1.00, 1.00), (-2.00, 2.00)),
+        ((-0.49, 0.49), (2.00, 0.77)),
+        ((-0.41, -0.43), (2.00, -0.54)),
+        ((-0.95, -1.00), (-1.90, -2.00)),
+    ];
+
+    let edges = run_fortunes(sites, boundary_polyline);
+    println!("edges: {:?}", edges);
+    for edge in &edges {
+        print!(
+            "(({:.2}, {:.2}), ({:.2}, {:.2})), ",
+            edge.first.x, edge.first.y, edge.second.x, edge.second.y
+        );
+    }
+    let expected = get_expectation(expected_edges);
+    check_line_segments_close(edges, expected);
+}
+
+#[test]
 fn test_fortunes_fail_bug_8() {
     let boundary_polyline = vec![
         (-2.0, -2.0),

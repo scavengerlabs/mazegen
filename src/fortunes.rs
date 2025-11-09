@@ -612,6 +612,9 @@ impl Beachline {
         self.add_slot(top_edge_slot_builder);
         self.replace_slot(target_slot_id, top_edge_slot_builder.id);
 
+        // remove obsolete node
+        self.nodes.remove(&target_slot_id);
+
         return vec![bottom_arc_slot_builder.id, top_arc_slot_builder.id];
     }
 
