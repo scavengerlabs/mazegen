@@ -32,13 +32,6 @@ fn generate_id() -> u32 {
 }
 
 impl Slot {
-    pub fn get_parent_id(&self) -> Option<u32> {
-        return self.parent;
-    }
-    pub fn get_mut_parent_id(&mut self) -> &mut Option<u32> {
-        return &mut self.parent;
-    }
-
     pub fn seq_str(&self, beachline: &Beachline) -> String {
         let upper_str = match self.upper_neighbor {
             Some(upper_neighbor_id) => {
@@ -302,7 +295,7 @@ impl Beachline {
 
     fn replace_slot(&mut self, old_id: u32, new_id: u32) {
         let old_node = &self.nodes[&old_id];
-        let parent_id = old_node.get_parent_id();
+        let parent_id = old_node.parent;
         match parent_id {
             Some(parent_id) => {
                 let parent_edge = self.get_mut_edge(&parent_id);
@@ -354,11 +347,11 @@ impl Beachline {
     }
 
     fn get_parent_id(&mut self, slot_id: &u32) -> Option<u32> {
-        return self.nodes[slot_id].get_parent_id();
+        return self.nodes[slot_id].parent;
     }
 
     fn get_mut_parent_id(&mut self, slot_id: &u32) -> &mut Option<u32> {
-        return self.nodes.get_mut(slot_id).unwrap().get_mut_parent_id();
+        return &mut self.nodes.get_mut(slot_id).unwrap().parent;
     }
 
     fn set_parent_id(&mut self, slot_id: &u32, parent_id: Option<u32>) {
@@ -587,7 +580,7 @@ impl Beachline {
             upper_child: top_arc_slot_builder.id,
         };
         top_edge_slot_builder.value = Some(Node::Edge(top_edge));
-        top_edge_slot_builder.parent = target_slot.get_parent_id();
+        top_edge_slot_builder.parent = target_slot.parent;
 
         // assign neighbors
         let target_slot_upper_neighbor_id = target_slot.upper_neighbor;
@@ -603,14 +596,6 @@ impl Beachline {
         bottom_arc_slot_builder.upper_neighbor = Some(bottom_edge_slot_builder.id);
         bottom_arc_slot_builder.lower_neighbor = target_slot_lower_neighbor_id;
 
-        // attach new subtree
-        self.add_slot(top_arc_slot_builder);
-        self.add_slot(new_arc_slot_builder);
-        self.add_slot(bottom_edge_slot_builder);
-        self.add_slot(bottom_arc_slot_builder);
-        self.add_slot(top_edge_slot_builder);
-        self.replace_slot(target_slot_id, top_edge_slot_builder.id);
-
         // fix neighbor links around inserted subtree
         if let Some(id) = target_slot_upper_neighbor_id {
             self.assign_lower_neighbor(id, top_arc_slot_builder.id);
@@ -618,6 +603,14 @@ impl Beachline {
         if let Some(id) = target_slot_lower_neighbor_id {
             self.assign_upper_neighbor(id, bottom_arc_slot_builder.id);
         }
+
+        // attach new subtree
+        self.add_slot(top_arc_slot_builder);
+        self.add_slot(new_arc_slot_builder);
+        self.add_slot(bottom_edge_slot_builder);
+        self.add_slot(bottom_arc_slot_builder);
+        self.add_slot(top_edge_slot_builder);
+        self.replace_slot(target_slot_id, top_edge_slot_builder.id);
 
         return vec![bottom_arc_slot_builder.id, top_arc_slot_builder.id];
     }

@@ -9,7 +9,7 @@ use wasm_bindgen::Clamped;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
 
-mod fortunes;
+// mod fortunes;
 
 struct MyImage {
     pixels: Vec<u8>,
