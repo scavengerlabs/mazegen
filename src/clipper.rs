@@ -1,12 +1,12 @@
 use super::geometry::{Direction, Line, LineSegment, Point, Polyline, Ray};
 
-pub fn clip(subject: Polyline, clip_edges: Vec<Line>, site: Point) -> Vec<Point> {
+pub fn clip(subject: &Polyline, clip_edges: &Vec<Line>, site: &Point) -> Vec<Point> {
     // subject is closed (end connects to beginning)
     // assume that clip is convex
     // clip may not be closed
     // site is inside the clip (semi-)polygon
 
-    let mut outputs = subject.points;
+    let mut outputs = subject.points.clone();
 
     for line in clip_edges {
         let inputs = outputs.clone();
@@ -63,7 +63,7 @@ mod tests {
         }];
         let site = Point { x: 0.0, y: -1.0 };
 
-        let points = clip(subject, clip_edges, site);
+        let points = clip(&subject, &clip_edges, &site);
 
         let expected_points = vec![
             Point { x: 1.0, y: -1.0 },

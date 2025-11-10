@@ -43,13 +43,7 @@ fn check_line_segments_close(
 
 #[test]
 fn test_fortunes_split_arc_being_squeezed() {
-    let boundary_polyline = vec![
-        (-2.0, -2.0),
-        (-2.0, 2.0),
-        (2.0, 2.0),
-        (2.0, -2.0),
-        (-2.0, -2.0),
-    ];
+    let boundary_polyline = vec![(-2.0, -2.0), (-2.0, 2.0), (2.0, 2.0), (2.0, -2.0)];
     let sites = vec![(-1.0, 0.0), (0.0, 1.0), (0.05, -1.0), (0.1, 0.1)];
     let expected_edges = vec![
         ((-1.00, 1.00), (-0.49, 0.49)),
@@ -70,13 +64,7 @@ fn test_fortunes_split_arc_being_squeezed() {
 
 #[test]
 fn test_fortunes_fail_bug_8() {
-    let boundary_polyline = vec![
-        (-2.0, -2.0),
-        (-2.0, 2.0),
-        (2.0, 2.0),
-        (2.0, -2.0),
-        (-2.0, -2.0),
-    ];
+    let boundary_polyline = vec![(-2.0, -2.0), (-2.0, 2.0), (2.0, 2.0), (2.0, -2.0)];
     let sites = vec![
         (-1.26, 1.02),
         (0.36, 0.64),
@@ -104,13 +92,7 @@ fn test_fortunes_fail_bug_8() {
 
 #[test]
 fn test_fortunes_fail_bug_7() {
-    let boundary_polyline = vec![
-        (-2.0, -2.0),
-        (-2.0, 2.0),
-        (2.0, 2.0),
-        (2.0, -2.0),
-        (-2.0, -2.0),
-    ];
+    let boundary_polyline = vec![(-2.0, -2.0), (-2.0, 2.0), (2.0, 2.0), (2.0, -2.0)];
     let sites = vec![
         (-1.77, 1.60),
         (0.24, 1.60),
@@ -137,13 +119,7 @@ fn test_fortunes_fail_bug_7() {
 
 #[test]
 fn test_fortunes_fail_bug_6() {
-    let boundary_polyline = vec![
-        (-2.0, -2.0),
-        (-2.0, 2.0),
-        (2.0, 2.0),
-        (2.0, -2.0),
-        (-2.0, -2.0),
-    ];
+    let boundary_polyline = vec![(-2.0, -2.0), (-2.0, 2.0), (2.0, 2.0), (2.0, -2.0)];
     let sites = vec![
         (-1.00, 1.97),
         (1.68, 0.86),
@@ -171,13 +147,7 @@ fn test_fortunes_fail_bug_6() {
 
 #[test]
 fn test_fortunes_fail_bug_5() {
-    let boundary_polyline = vec![
-        (-2.0, -2.0),
-        (-2.0, 2.0),
-        (2.0, 2.0),
-        (2.0, -2.0),
-        (-2.0, -2.0),
-    ];
+    let boundary_polyline = vec![(-2.0, -2.0), (-2.0, 2.0), (2.0, 2.0), (2.0, -2.0)];
     let sites = vec![(-0.46, -0.94), (-0.28, 1.74), (-0.35, -0.10), (1.00, -1.10)];
     let expected_edges = vec![
         ((-3.61, -0.10), (-14.86, 1.37)),
@@ -197,13 +167,7 @@ fn test_fortunes_fail_bug_5() {
 
 #[test]
 fn test_fortunes_fail_bug_4() {
-    let boundary_polyline = vec![
-        (-2.0, -2.0),
-        (-2.0, 2.0),
-        (2.0, 2.0),
-        (2.0, -2.0),
-        (-2.0, -2.0),
-    ];
+    let boundary_polyline = vec![(-2.0, -2.0), (-2.0, 2.0), (2.0, 2.0), (2.0, -2.0)];
     let sites = vec![(-1.68, 0.22), (-1.06, -0.80), (-0.25, -0.40), (1.57, -1.90)];
     let expected_edges = vec![
         ((-2.21, -0.80), (-0.94, -0.03)),
@@ -222,13 +186,7 @@ fn test_fortunes_fail_bug_4() {
 
 #[test]
 fn test_fortunes_fail_bug_3() {
-    let boundary_polyline = vec![
-        (-2.0, -2.0),
-        (-2.0, 2.0),
-        (2.0, 2.0),
-        (2.0, -2.0),
-        (-2.0, -2.0),
-    ];
+    let boundary_polyline = vec![(-2.0, -2.0), (-2.0, 2.0), (2.0, 2.0), (2.0, -2.0)];
     let sites = vec![(-0.10, 1.57), (0.62, 1.48), (1.66, 0.43), (1.84, -0.19)];
     let expected_edges = vec![
         ((0.25, 1.48), (0.05, -0.12)),
@@ -248,13 +206,7 @@ fn test_fortunes_fail_bug_3() {
 
 #[test]
 fn test_fortunes_fail_bug_2() {
-    let boundary_polyline = vec![
-        (-2.0, -2.0),
-        (-2.0, 2.0),
-        (2.0, 2.0),
-        (2.0, -2.0),
-        (-2.0, -2.0),
-    ];
+    let boundary_polyline = vec![(-2.0, -2.0), (-2.0, 2.0), (2.0, 2.0), (2.0, -2.0)];
     let sites = vec![
         (-1.77, 1.17),
         (-1.76, 1.89),
@@ -281,13 +233,7 @@ fn test_fortunes_fail_bug_2() {
 
 #[test]
 fn test_fortunes_fail_bug_1() {
-    let boundary_polyline = vec![
-        (-2.0, -2.0),
-        (-2.0, 2.0),
-        (2.0, 2.0),
-        (2.0, -2.0),
-        (-2.0, -2.0),
-    ];
+    let boundary_polyline = vec![(-2.0, -2.0), (-2.0, 2.0), (2.0, 2.0), (2.0, -2.0)];
     let sites = vec![(0.14, -1.10), (0.44, -0.08), (0.42, -1.09)];
     let expected_edges = vec![
         ((0.28, -1.09), (0.26, -0.58)),
@@ -304,13 +250,7 @@ fn test_fortunes_fail_bug_1() {
 
 #[test]
 fn test_fortunes_edge_bug_1() {
-    let boundary_polyline = vec![
-        (-2.0, -2.0),
-        (-2.0, 2.0),
-        (2.0, 2.0),
-        (2.0, -2.0),
-        (-2.0, -2.0),
-    ];
+    let boundary_polyline = vec![(-2.0, -2.0), (-2.0, 2.0), (2.0, 2.0), (2.0, -2.0)];
     let sites = vec![(-1.90, 1.00), (1.00, 0.00), (1.80, 1.30)];
     let expected_edges = vec![
         ((-0.62, 0.00), (-0.08, 1.56)),
@@ -327,13 +267,7 @@ fn test_fortunes_edge_bug_1() {
 
 #[test]
 fn test_fortunes_edge_bug_2() {
-    let boundary_polyline = vec![
-        (-2.0, -2.0),
-        (-2.0, 2.0),
-        (2.0, 2.0),
-        (2.0, -2.0),
-        (-2.0, -2.0),
-    ];
+    let boundary_polyline = vec![(-2.0, -2.0), (-2.0, 2.0), (2.0, 2.0), (2.0, -2.0)];
     let sites = vec![(0.00, 0.20), (0.50, 1.50), (0.70, 0.10)];
     let expected_edges = vec![
         ((-1.44, 1.50), (0.44, 0.78)),
@@ -350,13 +284,7 @@ fn test_fortunes_edge_bug_2() {
 
 #[test]
 fn test_fortunes_x_line() {
-    let boundary_polyline = vec![
-        (-2.0, -2.0),
-        (-2.0, 2.0),
-        (2.0, 2.0),
-        (2.0, -2.0),
-        (-2.0, -2.0),
-    ];
+    let boundary_polyline = vec![(-2.0, -2.0), (-2.0, 2.0), (2.0, 2.0), (2.0, -2.0)];
     let sites = vec![(0.00, 0.00), (1.00, 0.00), (2.00, 0.00)];
     let expected_edges = vec![
         ((0.50, 0.00), (0.50, 2.00)),
@@ -372,13 +300,7 @@ fn test_fortunes_x_line() {
 
 #[test]
 fn test_fortunes_right_opening_v() {
-    let boundary_polyline = vec![
-        (-2.0, -2.0),
-        (-2.0, 2.0),
-        (2.0, 2.0),
-        (2.0, -2.0),
-        (-2.0, -2.0),
-    ];
+    let boundary_polyline = vec![(-2.0, -2.0), (-2.0, 2.0), (2.0, 2.0), (2.0, -2.0)];
     let sites = vec![(0.00, 0.00), (1.00, 1.00), (1.01, -1.00)];
     let expected_edges = vec![
         ((0.00, 1.00), (1.00, -0.00)),

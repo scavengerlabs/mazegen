@@ -1,3 +1,4 @@
+use clipper::clip;
 use geometry::{Direction, LineSegment, Parabola, Point, Polyline, Ray};
 use rand::Rng;
 use std::cmp;
@@ -247,7 +248,7 @@ struct Beachline {
     root: Option<u32>,
     nodes: HashMap<u32, Slot>,
     complete_edges: Vec<(u32, LineSegment)>,
-    complete_sites: Vec<Point>,
+    complete_sites: Vec<Site>,
     cell_separators: HashMap<u32, HashSet<u32>>,
 }
 
@@ -498,7 +499,7 @@ impl Beachline {
 
         // wrap up
         let target_arc = self.get_arc(&target_arc_slot_id).unwrap();
-        self.complete_sites.push(target_arc.focus.location);
+        self.complete_sites.push(target_arc.focus);
         // remove obsolete edges
         self.nodes.remove(&lower_edge_slot_id);
         self.nodes.remove(&upper_edge_slot_id);
@@ -871,9 +872,9 @@ fn get_path_from_points(start: &Point, end: &Point, color: &str, width: f32) -> 
 fn plot(beachline: &Beachline, boundaries: &Polyline, width: f32) {
     let mut document = Document::new().set("viewBox", (-2.5, -2.5, 5, 5));
 
-    for idx in 0..boundaries.points.len() - 1 {
+    for idx in 0..boundaries.points.len() {
         let start = boundaries.points[idx];
-        let end = boundaries.points[idx + 1];
+        let end = boundaries.points[(idx + 1) % boundaries.points.len()];
         let data = Data::new()
             .move_to((start.x, start.y))
             .line_by((end.x - start.x, end.y - start.y))
@@ -881,6 +882,7 @@ fn plot(beachline: &Beachline, boundaries: &Polyline, width: f32) {
 
         let path = Path::new()
             .set("fill", "none")
+            .set("opacity", 0.3)
             .set("stroke", "black")
             .set("stroke-width", width)
             .set("d", data);
@@ -912,13 +914,47 @@ fn plot(beachline: &Beachline, boundaries: &Polyline, width: f32) {
         let segments = edges_by_separator.get_mut(separator_id).unwrap();
         segments.push(segment);
     }
+    let mut site_by_id = HashMap::new();
+    for site in &beachline.complete_sites {
+        site_by_id.insert(site.id, *site);
+    }
+    for (_, node) in &beachline.nodes {
+        if let Node::Arc(arc) = node.value {
+            site_by_id.insert(arc.focus.id, arc.focus);
+        }
+    }
     for (site_id, separator_ids) in &beachline.cell_separators {
         println!("separator_ids: {:?}", separator_ids);
+        let site = site_by_id[site_id];
+        let mut lines = vec![];
         for separator_id in separator_ids {
+            for segment in &edges_by_separator[separator_id] {
+                lines.push(segment.to_line());
+            }
             for segment in &edges_by_separator[separator_id] {
                 let path = get_path_from_points(&segment.first, &segment.second, "red", width);
                 document = document.add(path);
             }
+        }
+        let clipped = clip(boundaries, &lines, &site.location);
+        println!("clipped: {:?}", clipped);
+
+        for idx in 0..clipped.len() {
+            let start = clipped[idx];
+            let end = clipped[(idx + 1) % clipped.len()];
+            let data = Data::new()
+                .move_to((start.x, start.y))
+                .line_by((end.x - start.x, end.y - start.y))
+                .close();
+
+            let path = Path::new()
+                .set("fill", "none")
+                .set("stroke", "purple")
+                .set("opacity", 0.3)
+                .set("stroke-width", width)
+                .set("d", data);
+
+            document = document.add(path);
         }
         break;
     }
@@ -928,12 +964,12 @@ fn plot(beachline: &Beachline, boundaries: &Polyline, width: f32) {
         document = document.add(path);
     }
 
-    for point in &beachline.complete_sites {
+    for site in &beachline.complete_sites {
         let path = Circle::new()
             .set("fill", "blue")
             .set("opacity", 0.3)
-            .set("cx", point.x)
-            .set("cy", point.y)
+            .set("cx", site.location.x)
+            .set("cy", site.location.y)
             .set("r", width);
 
         document = document.add(path);
@@ -976,13 +1012,7 @@ fn main() {
         sites.push((rng.random::<f32>() * 4. - 2., rng.random::<f32>() * 4. - 2.));
     }
 
-    let boundary_polyline = vec![
-        (-2.0, -2.0),
-        (-2.0, 2.0),
-        (2.0, 2.0),
-        (2.0, -2.0),
-        (-2.0, -2.0),
-    ];
+    let boundary_polyline = vec![(-2.0, -2.0), (-2.0, 2.0), (2.0, 2.0), (2.0, -2.0)];
 
     run_fortunes(sites, boundary_polyline);
 }

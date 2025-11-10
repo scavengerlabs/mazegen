@@ -61,6 +61,13 @@ impl LineSegment {
             .sqrt();
     }
 
+    pub fn to_line(&self) -> Line {
+        return Line {
+            start: self.first,
+            direction: Direction::new(self.second.x - self.first.x, self.second.y - self.first.y),
+        };
+    }
+
     pub fn intersection(&self, ray: Ray) -> Option<Point> {
         let segment_ray = Ray {
             start: self.first,
@@ -80,7 +87,7 @@ impl LineSegment {
         }
     }
 
-    pub fn intersection_with_line(&self, line: Line) -> Option<Point> {
+    pub fn intersection_with_line(&self, line: &Line) -> Option<Point> {
         let segment_ray = Ray {
             start: self.first,
             direction: Direction::new(self.second.x - self.first.x, self.second.y - self.first.y),
@@ -100,6 +107,7 @@ impl LineSegment {
     }
 }
 
+#[derive(Debug)]
 pub struct Polyline {
     pub points: Vec<Point>,
 }
@@ -112,10 +120,10 @@ impl Polyline {
     pub fn furthest_intersection(&self, ray: Ray) -> Option<Point> {
         let mut output = None;
         let mut max_distance = f32::MIN;
-        for idx in 0..self.points.len() - 1 {
+        for idx in 0..self.points.len() {
             let line_segment = LineSegment {
                 first: self.points[idx],
-                second: self.points[idx + 1],
+                second: self.points[(idx + 1) % self.points.len()],
             };
             match line_segment.intersection(ray) {
                 Some(point) => {
