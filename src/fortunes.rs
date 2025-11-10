@@ -246,7 +246,7 @@ impl Arc {
 struct Beachline {
     root: Option<u32>,
     nodes: HashMap<u32, Slot>,
-    complete_edges: HashMap<u32, (u32, LineSegment)>,
+    complete_edges: Vec<(u32, LineSegment)>,
     complete_sites: Vec<Point>,
     cell_separators: HashMap<u32, HashSet<u32>>,
 }
@@ -275,7 +275,7 @@ impl Beachline {
         return Beachline {
             root: None,
             nodes: HashMap::new(),
-            complete_edges: HashMap::new(),
+            complete_edges: vec![],
             complete_sites: vec![],
             cell_separators: HashMap::new(),
         };
@@ -506,20 +506,14 @@ impl Beachline {
         self.nodes.remove(&target_arc_slot_id);
 
         let (lower_length, upper_length) = lower_edge.ray.terminate(upper_edge.ray).unwrap();
-        self.complete_edges.insert(
-            lower_edge_slot_id,
-            (
-                lower_edge.separator_id,
-                lower_edge.to_line_segment(lower_length),
-            ),
-        );
-        self.complete_edges.insert(
-            upper_edge_slot_id,
-            (
-                upper_edge.separator_id,
-                upper_edge.to_line_segment(upper_length),
-            ),
-        );
+        self.complete_edges.push((
+            lower_edge.separator_id,
+            lower_edge.to_line_segment(lower_length),
+        ));
+        self.complete_edges.push((
+            upper_edge.separator_id,
+            upper_edge.to_line_segment(upper_length),
+        ));
 
         return arcs_to_check;
     }
@@ -843,16 +837,13 @@ fn fortunes(sites: Vec<Site>, boundaries: &Polyline) -> Beachline {
     for (edge_slot_id, edge) in beachline.sorted_edges(beachline.root.unwrap()) {
         match boundaries.furthest_intersection(edge.ray) {
             Some(point) => {
-                beachline.complete_edges.insert(
-                    edge_slot_id,
-                    (
-                        edge.separator_id,
-                        LineSegment {
-                            first: edge.ray.start,
-                            second: point,
-                        },
-                    ),
-                );
+                beachline.complete_edges.push((
+                    edge.separator_id,
+                    LineSegment {
+                        first: edge.ray.start,
+                        second: point,
+                    },
+                ));
             }
             None => {
                 println!("found no intersection with boundaries")
@@ -913,9 +904,8 @@ fn plot(beachline: &Beachline, boundaries: &Polyline, width: f32) {
         }
     }
 
-    let edges: Vec<&(u32, LineSegment)> = beachline.complete_edges.values().collect();
     let mut edges_by_separator = HashMap::new();
-    for (separator_id, segment) in edges {
+    for (separator_id, segment) in &beachline.complete_edges {
         if !edges_by_separator.contains_key(separator_id) {
             edges_by_separator.insert(separator_id, vec![]);
         }
@@ -933,7 +923,7 @@ fn plot(beachline: &Beachline, boundaries: &Polyline, width: f32) {
         break;
     }
 
-    for (segment_id, (_, segment)) in &beachline.complete_edges {
+    for (_, segment) in &beachline.complete_edges {
         let path = get_path_from_points(&segment.first, &segment.second, "green", width);
         document = document.add(path);
     }
@@ -955,7 +945,7 @@ fn plot(beachline: &Beachline, boundaries: &Polyline, width: f32) {
 fn run_fortunes(
     points: Vec<(f32, f32)>,
     boundary_points: Vec<(f32, f32)>,
-) -> HashMap<u32, (u32, LineSegment)> {
+) -> Vec<(u32, LineSegment)> {
     let sites = add_sites(points);
 
     let mut boundaries = Polyline::new();

@@ -49,7 +49,7 @@ impl Point {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LineSegment {
     pub first: Point,
     pub second: Point,
