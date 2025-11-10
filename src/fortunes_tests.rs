@@ -18,14 +18,15 @@ fn get_expectation(expected_edges: Vec<((f32, f32), (f32, f32))>) -> Vec<LineSeg
 }
 
 fn check_line_segments_close(
-    first_segments: HashMap<u32, LineSegment>,
+    first_segments: HashMap<u32, (u32, LineSegment)>,
     second_segments: Vec<LineSegment>,
 ) {
-    let mut sorted_first_segments: Vec<(&u32, &LineSegment)> = first_segments.iter().collect();
+    let mut sorted_first_segments: Vec<(&u32, &(u32, LineSegment))> =
+        first_segments.iter().collect();
     sorted_first_segments.sort_by_key(|(key, _)| *key);
     println!("sorted first segments: {:?}", sorted_first_segments);
 
-    for (edge_id, edge) in &sorted_first_segments {
+    for (edge_id, (_, edge)) in &sorted_first_segments {
         println!(
             "(({:.2}, {:.2}), ({:.2}, {:.2})), ",
             edge.first.x, edge.first.y, edge.second.x, edge.second.y
@@ -33,7 +34,7 @@ fn check_line_segments_close(
     }
 
     assert_eq!(first_segments.len(), second_segments.len());
-    for ((_, first_segment), second_segment) in
+    for ((_, (_, first_segment)), second_segment) in
         sorted_first_segments.iter().zip(second_segments.iter())
     {
         assert!(first_segment.first.close_to(&second_segment.first, 0.01));

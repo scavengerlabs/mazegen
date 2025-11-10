@@ -3,6 +3,7 @@ use rand::Rng;
 use std::cmp;
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};
 use svg::node::element::path::Data;
@@ -175,6 +176,7 @@ struct Edge {
     ray: Ray,
     lower_child: u32,
     upper_child: u32,
+    separator_id: u32, // an ID for the boundary separating two adjacent sites - there are often two Edges/Rays per separator
 }
 
 impl Edge {
@@ -244,9 +246,9 @@ impl Arc {
 struct Beachline {
     root: Option<u32>,
     nodes: HashMap<u32, Slot>,
-    complete_edges: HashMap<u32, LineSegment>,
+    complete_edges: HashMap<u32, (u32, LineSegment)>,
     complete_sites: Vec<Point>,
-    cell_edges: HashMap<u32, Vec<u32>>,
+    cell_separators: HashMap<u32, HashSet<u32>>,
 }
 
 impl fmt::Display for Beachline {
@@ -275,7 +277,7 @@ impl Beachline {
             nodes: HashMap::new(),
             complete_edges: HashMap::new(),
             complete_sites: vec![],
-            cell_edges: HashMap::new(),
+            cell_separators: HashMap::new(),
         };
     }
 
@@ -364,6 +366,14 @@ impl Beachline {
         return self.nodes[arc_slot_id].value.get_arc().unwrap().focus.id;
     }
 
+    fn get_separator_id(&self, edge_slot_id: &u32) -> u32 {
+        return self.nodes[edge_slot_id]
+            .value
+            .get_edge()
+            .unwrap()
+            .separator_id;
+    }
+
     // each edge corresponds to a y value where two arcs collide
     pub fn remove_arc(&mut self, target_arc_slot_id: u32, directrix: f32) -> Vec<u32> {
         if !self.nodes.contains_key(&target_arc_slot_id) {
@@ -436,6 +446,7 @@ impl Beachline {
             ray: new_ray,
             lower_child: edge_to_replace.lower_child,
             upper_child: edge_to_replace.upper_child,
+            separator_id: generate_id(),
         };
         let mut new_edge_slot_builder = Slot::builder();
         new_edge_slot_builder.lower_neighbor = Some(lower_arc_slot_id);
@@ -466,22 +477,24 @@ impl Beachline {
         let lower_site_id = self.get_site_id(&lower_arc_slot_id);
         let target_site_id = self.get_site_id(&target_arc_slot_id);
         let upper_site_id = self.get_site_id(&upper_arc_slot_id);
-        if !self.cell_edges.contains_key(&lower_site_id) {
-            self.cell_edges.insert(lower_site_id, vec![]);
+        let lower_separator_id = self.get_separator_id(&lower_edge_slot_id);
+        let upper_separator_id = self.get_separator_id(&upper_edge_slot_id);
+        if !self.cell_separators.contains_key(&lower_site_id) {
+            self.cell_separators.insert(lower_site_id, HashSet::new());
         }
-        let lower_cell_edges = self.cell_edges.get_mut(&lower_site_id).unwrap();
-        lower_cell_edges.push(lower_edge_slot_id);
-        if !self.cell_edges.contains_key(&target_site_id) {
-            self.cell_edges.insert(target_site_id, vec![]);
+        let lower_cell_separators = self.cell_separators.get_mut(&lower_site_id).unwrap();
+        lower_cell_separators.insert(lower_separator_id);
+        if !self.cell_separators.contains_key(&target_site_id) {
+            self.cell_separators.insert(target_site_id, HashSet::new());
         }
-        let target_cell_edges = self.cell_edges.get_mut(&target_site_id).unwrap();
-        target_cell_edges.push(lower_edge_slot_id);
-        target_cell_edges.push(upper_edge_slot_id);
-        if !self.cell_edges.contains_key(&upper_site_id) {
-            self.cell_edges.insert(upper_site_id, vec![]);
+        let target_cell_separators = self.cell_separators.get_mut(&target_site_id).unwrap();
+        target_cell_separators.insert(lower_separator_id);
+        target_cell_separators.insert(upper_separator_id);
+        if !self.cell_separators.contains_key(&upper_site_id) {
+            self.cell_separators.insert(upper_site_id, HashSet::new());
         }
-        let upper_cell_edges = self.cell_edges.get_mut(&upper_site_id).unwrap();
-        upper_cell_edges.push(upper_edge_slot_id);
+        let upper_cell_separators = self.cell_separators.get_mut(&upper_site_id).unwrap();
+        upper_cell_separators.insert(upper_separator_id);
 
         // wrap up
         let target_arc = self.get_arc(&target_arc_slot_id).unwrap();
@@ -493,10 +506,20 @@ impl Beachline {
         self.nodes.remove(&target_arc_slot_id);
 
         let (lower_length, upper_length) = lower_edge.ray.terminate(upper_edge.ray).unwrap();
-        self.complete_edges
-            .insert(lower_edge_slot_id, lower_edge.to_line_segment(lower_length));
-        self.complete_edges
-            .insert(upper_edge_slot_id, upper_edge.to_line_segment(upper_length));
+        self.complete_edges.insert(
+            lower_edge_slot_id,
+            (
+                lower_edge.separator_id,
+                lower_edge.to_line_segment(lower_length),
+            ),
+        );
+        self.complete_edges.insert(
+            upper_edge_slot_id,
+            (
+                upper_edge.separator_id,
+                upper_edge.to_line_segment(upper_length),
+            ),
+        );
 
         return arcs_to_check;
     }
@@ -600,10 +623,12 @@ impl Beachline {
         let (up_ray, down_ray) = target_arc.split(site);
 
         // create new edges
+        let separator_id = generate_id();
         let bottom_edge = Edge {
             ray: down_ray,
             lower_child: bottom_arc_slot_builder.id,
             upper_child: new_arc_slot_builder.id,
+            separator_id: separator_id,
         };
         bottom_edge_slot_builder.value = Some(Node::Edge(bottom_edge));
         bottom_edge_slot_builder.parent = Some(top_edge_slot_builder.id);
@@ -611,6 +636,7 @@ impl Beachline {
             ray: up_ray,
             lower_child: bottom_edge_slot_builder.id,
             upper_child: top_arc_slot_builder.id,
+            separator_id: separator_id,
         };
         top_edge_slot_builder.value = Some(Node::Edge(top_edge));
         top_edge_slot_builder.parent = target_slot.parent;
@@ -809,7 +835,7 @@ fn fortunes(sites: Vec<Site>, boundaries: &Polyline) -> Beachline {
             }
         }
         println!("beachline: {}", beachline);
-        println!("cell edges: {:?}", beachline.cell_edges);
+        println!("cell_separators: {:?}", beachline.cell_separators);
         // println!("complete edges: {:?}", beachline.complete_edges);
     }
 
@@ -819,10 +845,13 @@ fn fortunes(sites: Vec<Site>, boundaries: &Polyline) -> Beachline {
             Some(point) => {
                 beachline.complete_edges.insert(
                     edge_slot_id,
-                    LineSegment {
-                        first: edge.ray.start,
-                        second: point,
-                    },
+                    (
+                        edge.separator_id,
+                        LineSegment {
+                            first: edge.ray.start,
+                            second: point,
+                        },
+                    ),
                 );
             }
             None => {
@@ -884,7 +913,27 @@ fn plot(beachline: &Beachline, boundaries: &Polyline, width: f32) {
         }
     }
 
-    for (segment_id, segment) in &beachline.complete_edges {
+    let edges: Vec<&(u32, LineSegment)> = beachline.complete_edges.values().collect();
+    let mut edges_by_separator = HashMap::new();
+    for (separator_id, segment) in edges {
+        if !edges_by_separator.contains_key(separator_id) {
+            edges_by_separator.insert(separator_id, vec![]);
+        }
+        let segments = edges_by_separator.get_mut(separator_id).unwrap();
+        segments.push(segment);
+    }
+    for (site_id, separator_ids) in &beachline.cell_separators {
+        println!("separator_ids: {:?}", separator_ids);
+        for separator_id in separator_ids {
+            for segment in &edges_by_separator[separator_id] {
+                let path = get_path_from_points(&segment.first, &segment.second, "red", width);
+                document = document.add(path);
+            }
+        }
+        break;
+    }
+
+    for (segment_id, (_, segment)) in &beachline.complete_edges {
         let path = get_path_from_points(&segment.first, &segment.second, "green", width);
         document = document.add(path);
     }
@@ -906,7 +955,7 @@ fn plot(beachline: &Beachline, boundaries: &Polyline, width: f32) {
 fn run_fortunes(
     points: Vec<(f32, f32)>,
     boundary_points: Vec<(f32, f32)>,
-) -> HashMap<u32, LineSegment> {
+) -> HashMap<u32, (u32, LineSegment)> {
     let sites = add_sites(points);
 
     let mut boundaries = Polyline::new();
