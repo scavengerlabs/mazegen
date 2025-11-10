@@ -77,7 +77,7 @@ impl Slot {
     pub fn str(&self, beachline: &Beachline, prefix: String) -> String {
         match self.value {
             Node::Arc(arc) => {
-                return format!("a{:03} {}", self.id, arc.focus);
+                return format!("a{:03} {}", self.id, arc.focus.location);
             }
             Node::Edge(edge) => {
                 let first = format!(
@@ -203,11 +203,11 @@ impl Edge {
 
 #[derive(Copy, Clone, Debug)]
 struct Arc {
-    focus: Point,
+    focus: Site,
 }
 
 impl Arc {
-    pub fn new(focus: Point) -> Self {
+    pub fn new(focus: Site) -> Self {
         return Arc { focus: focus };
     }
 
@@ -216,7 +216,7 @@ impl Arc {
     }
 
     pub fn get_parabola(&self, directrix: f32) -> Parabola {
-        return self.focus.to_parabola(directrix);
+        return self.focus.location.to_parabola(directrix);
     }
 
     pub fn split(&self, site: &Site) -> (Ray, Ray) {
@@ -244,8 +244,9 @@ impl Arc {
 struct Beachline {
     root: Option<u32>,
     nodes: HashMap<u32, Slot>,
-    complete_edges: Vec<LineSegment>,
+    complete_edges: HashMap<u32, LineSegment>,
     complete_sites: Vec<Point>,
+    cell_edges: HashMap<u32, Vec<u32>>,
 }
 
 impl fmt::Display for Beachline {
@@ -272,17 +273,18 @@ impl Beachline {
         return Beachline {
             root: None,
             nodes: HashMap::new(),
-            complete_edges: vec![],
+            complete_edges: HashMap::new(),
             complete_sites: vec![],
+            cell_edges: HashMap::new(),
         };
     }
 
-    pub fn sorted_edges(&self, root: u32) -> Vec<Edge> {
+    pub fn sorted_edges(&self, root: u32) -> Vec<(u32, Edge)> {
         match self.nodes[&root].value {
             Node::Edge(edge) => {
                 return vec![
                     self.sorted_edges(edge.upper_child),
-                    vec![edge],
+                    vec![(root, edge)],
                     self.sorted_edges(edge.lower_child),
                 ]
                 .concat();
@@ -358,6 +360,10 @@ impl Beachline {
         *self.get_mut_parent_id(slot_id) = parent_id;
     }
 
+    fn get_site_id(&self, arc_slot_id: &u32) -> u32 {
+        return self.nodes[arc_slot_id].value.get_arc().unwrap().focus.id;
+    }
+
     // each edge corresponds to a y value where two arcs collide
     pub fn remove_arc(&mut self, target_arc_slot_id: u32, directrix: f32) -> Vec<u32> {
         if !self.nodes.contains_key(&target_arc_slot_id) {
@@ -370,8 +376,8 @@ impl Beachline {
         let upper_arc_slot_id = self.get_upper_neighbor(upper_edge_slot_id).unwrap();
         let lower_edge_slot = &self.nodes[&lower_edge_slot_id];
         let upper_edge_slot = &self.nodes[&upper_edge_slot_id];
-        let lower_site = self.get_arc(&lower_arc_slot_id).unwrap().focus;
-        let upper_site = self.get_arc(&upper_arc_slot_id).unwrap().focus;
+        let lower_site = self.get_arc(&lower_arc_slot_id).unwrap().focus.location;
+        let upper_site = self.get_arc(&upper_arc_slot_id).unwrap().focus.location;
         let lower_edge = &lower_edge_slot.value.get_edge().unwrap();
         let upper_edge = &upper_edge_slot.value.get_edge().unwrap();
         let new_start = lower_edge.ray.intersection(upper_edge.ray).unwrap();
@@ -455,8 +461,31 @@ impl Beachline {
             arcs_to_check.push(upper_arc_slot_id);
         }
 
+        // assign lower_edge to target_site and lower_arc
+        // assign upper_edge to target_site and upper_arc
+        let lower_site_id = self.get_site_id(&lower_arc_slot_id);
+        let target_site_id = self.get_site_id(&target_arc_slot_id);
+        let upper_site_id = self.get_site_id(&upper_arc_slot_id);
+        if !self.cell_edges.contains_key(&lower_site_id) {
+            self.cell_edges.insert(lower_site_id, vec![]);
+        }
+        let lower_cell_edges = self.cell_edges.get_mut(&lower_site_id).unwrap();
+        lower_cell_edges.push(lower_edge_slot_id);
+        if !self.cell_edges.contains_key(&target_site_id) {
+            self.cell_edges.insert(target_site_id, vec![]);
+        }
+        let target_cell_edges = self.cell_edges.get_mut(&target_site_id).unwrap();
+        target_cell_edges.push(lower_edge_slot_id);
+        target_cell_edges.push(upper_edge_slot_id);
+        if !self.cell_edges.contains_key(&upper_site_id) {
+            self.cell_edges.insert(upper_site_id, vec![]);
+        }
+        let upper_cell_edges = self.cell_edges.get_mut(&upper_site_id).unwrap();
+        upper_cell_edges.push(upper_edge_slot_id);
+
+        // wrap up
         let target_arc = self.get_arc(&target_arc_slot_id).unwrap();
-        self.complete_sites.push(target_arc.focus);
+        self.complete_sites.push(target_arc.focus.location);
         // remove obsolete edges
         self.nodes.remove(&lower_edge_slot_id);
         self.nodes.remove(&upper_edge_slot_id);
@@ -465,12 +494,10 @@ impl Beachline {
 
         let (lower_length, upper_length) = lower_edge.ray.terminate(upper_edge.ray).unwrap();
         self.complete_edges
-            .push(lower_edge.to_line_segment(lower_length));
+            .insert(lower_edge_slot_id, lower_edge.to_line_segment(lower_length));
         self.complete_edges
-            .push(upper_edge.to_line_segment(upper_length));
-        // let target_cell_edges = self.cell_edges.get_mut(target_site_id);
-        // target_cell_edges.push(lower_edge_id);
-        // target_cell_edges.push(upper_edge_id);
+            .insert(upper_edge_slot_id, upper_edge.to_line_segment(upper_length));
+
         return arcs_to_check;
     }
 
@@ -516,8 +543,14 @@ impl Beachline {
         match lower_edge.ray.intersection(upper_edge.ray) {
             Some(intersection) => {
                 // given d the distance between the arc focus and the intersection
-                let d = intersection
-                    .distance_from(&self.nodes[&arc_slot_id].value.get_arc().unwrap().focus);
+                let d = intersection.distance_from(
+                    &self.nodes[&arc_slot_id]
+                        .value
+                        .get_arc()
+                        .unwrap()
+                        .focus
+                        .location,
+                );
                 // the arc should be removed and the edges terminated when the directrix is distance d from the intersection
                 return Some(intersection.x + d);
             }
@@ -534,7 +567,7 @@ impl Beachline {
     pub fn add_site(&mut self, site: &Site) -> Vec<u32> {
         if self.root.is_none() {
             let mut new_arc_slot_builder = Slot::builder();
-            let new_arc = Arc::new(site.location);
+            let new_arc = Arc::new(*site);
             new_arc_slot_builder.value = Some(Node::Arc(new_arc));
             self.root = Some(new_arc_slot_builder.id);
             self.add_slot(new_arc_slot_builder);
@@ -556,7 +589,7 @@ impl Beachline {
         let bottom_arc = Arc::new(target_arc.focus);
         bottom_arc_slot_builder.value = Some(Node::Arc(bottom_arc));
         bottom_arc_slot_builder.parent = Some(bottom_edge_slot_builder.id);
-        let new_arc = Arc::new(site.location);
+        let new_arc = Arc::new(*site);
         new_arc_slot_builder.value = Some(Node::Arc(new_arc));
         new_arc_slot_builder.parent = Some(bottom_edge_slot_builder.id);
         let top_arc = Arc::new(target_arc.focus);
@@ -725,6 +758,7 @@ impl Ord for Event {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Site {
+    id: u32,
     location: Point,
 }
 
@@ -741,6 +775,7 @@ fn add_sites(points: Vec<(f32, f32)>) -> Vec<Site> {
 
     for point in points {
         sites.push(Site {
+            id: generate_id(),
             location: Point {
                 x: point.0,
                 y: point.1,
@@ -774,17 +809,21 @@ fn fortunes(sites: Vec<Site>, boundaries: &Polyline) -> Beachline {
             }
         }
         println!("beachline: {}", beachline);
+        println!("cell edges: {:?}", beachline.cell_edges);
         // println!("complete edges: {:?}", beachline.complete_edges);
     }
 
     // complete rays
-    for edge in beachline.sorted_edges(beachline.root.unwrap()) {
+    for (edge_slot_id, edge) in beachline.sorted_edges(beachline.root.unwrap()) {
         match boundaries.furthest_intersection(edge.ray) {
             Some(point) => {
-                beachline.complete_edges.push(LineSegment {
-                    first: edge.ray.start,
-                    second: point,
-                });
+                beachline.complete_edges.insert(
+                    edge_slot_id,
+                    LineSegment {
+                        first: edge.ray.start,
+                        second: point,
+                    },
+                );
             }
             None => {
                 println!("found no intersection with boundaries")
@@ -835,8 +874,8 @@ fn plot(beachline: &Beachline, boundaries: &Polyline, width: f32) {
                 let path = Circle::new()
                     .set("fill", "black")
                     .set("opacity", 0.3)
-                    .set("cx", arc.focus.x)
-                    .set("cy", arc.focus.y)
+                    .set("cx", arc.focus.location.x)
+                    .set("cy", arc.focus.location.y)
                     .set("r", width);
 
                 document = document.add(path);
@@ -845,7 +884,7 @@ fn plot(beachline: &Beachline, boundaries: &Polyline, width: f32) {
         }
     }
 
-    for segment in &beachline.complete_edges {
+    for (segment_id, segment) in &beachline.complete_edges {
         let path = get_path_from_points(&segment.first, &segment.second, "green", width);
         document = document.add(path);
     }
@@ -864,7 +903,10 @@ fn plot(beachline: &Beachline, boundaries: &Polyline, width: f32) {
     svg::save("image.svg", &document).unwrap();
 }
 
-fn run_fortunes(points: Vec<(f32, f32)>, boundary_points: Vec<(f32, f32)>) -> Vec<LineSegment> {
+fn run_fortunes(
+    points: Vec<(f32, f32)>,
+    boundary_points: Vec<(f32, f32)>,
+) -> HashMap<u32, LineSegment> {
     let sites = add_sites(points);
 
     let mut boundaries = Polyline::new();
