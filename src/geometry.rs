@@ -117,6 +117,32 @@ impl Polyline {
         return Polyline { points: vec![] };
     }
 
+    pub fn area(&self) -> f32 {
+        let mut area: f32 = 0.0;
+        for idx in 0..self.points.len() {
+            let first = self.points[idx];
+            let second = self.points[(idx + 1) % self.points.len()];
+            area += first.x * second.y - second.x * first.y;
+        }
+        area /= 2.0;
+        return area;
+    }
+
+    pub fn centroid(&self) -> Point {
+        let area = self.area();
+        let mut cx: f32 = 0.0;
+        let mut cy: f32 = 0.0;
+        for idx in 0..self.points.len() {
+            let first = self.points[idx];
+            let second = self.points[(idx + 1) % self.points.len()];
+            cx += (first.x + second.x) * (first.x * second.y - second.x * first.y);
+            cy += (first.y + second.y) * (first.x * second.y - second.x * first.y);
+        }
+        cx /= 6.0 * area;
+        cy /= 6.0 * area;
+        return Point { x: cx, y: cy };
+    }
+
     pub fn furthest_intersection(&self, ray: Ray) -> Option<Point> {
         let mut output = None;
         let mut max_distance = f32::MIN;

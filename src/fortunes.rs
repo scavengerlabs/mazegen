@@ -838,6 +838,39 @@ fn fortunes(sites: Vec<Site>, boundaries: &Polyline) -> Beachline {
     for (edge_slot_id, edge) in beachline.sorted_edges(beachline.root.unwrap()) {
         match boundaries.furthest_intersection(edge.ray) {
             Some(point) => {
+                let separator_id = edge.separator_id;
+                if let Some(lower_arc_id) = beachline.get_lower_neighbor(edge_slot_id) {
+                    let lower_site_id = beachline.nodes[&lower_arc_id]
+                        .value
+                        .get_arc()
+                        .unwrap()
+                        .focus
+                        .id;
+                    if !beachline.cell_separators.contains_key(&lower_site_id) {
+                        beachline
+                            .cell_separators
+                            .insert(lower_site_id, HashSet::new());
+                    }
+                    let lower_cell_separators =
+                        beachline.cell_separators.get_mut(&lower_site_id).unwrap();
+                    lower_cell_separators.insert(separator_id);
+                }
+                if let Some(upper_arc_id) = beachline.get_upper_neighbor(edge_slot_id) {
+                    let upper_site_id = beachline.nodes[&upper_arc_id]
+                        .value
+                        .get_arc()
+                        .unwrap()
+                        .focus
+                        .id;
+                    if !beachline.cell_separators.contains_key(&upper_site_id) {
+                        beachline
+                            .cell_separators
+                            .insert(upper_site_id, HashSet::new());
+                    }
+                    let upper_cell_separators =
+                        beachline.cell_separators.get_mut(&upper_site_id).unwrap();
+                    upper_cell_separators.insert(separator_id);
+                }
                 beachline.complete_edges.push((
                     edge.separator_id,
                     LineSegment {
@@ -928,9 +961,8 @@ fn plot(beachline: &Beachline, boundaries: &Polyline, width: f32) {
         let site = site_by_id[site_id];
         let mut lines = vec![];
         for separator_id in separator_ids {
-            for segment in &edges_by_separator[separator_id] {
-                lines.push(segment.to_line());
-            }
+            // get line from first segment (they're colinear)
+            lines.push(edges_by_separator[separator_id][0].to_line());
             for segment in &edges_by_separator[separator_id] {
                 let path = get_path_from_points(&segment.first, &segment.second, "red", width);
                 document = document.add(path);
@@ -955,7 +987,31 @@ fn plot(beachline: &Beachline, boundaries: &Polyline, width: f32) {
                 .set("d", data);
 
             document = document.add(path);
+
+            let data = Data::new()
+                .move_to((start.x, start.y))
+                .line_by(((end.x - start.x) * 0.1, (end.y - start.y) * 0.1))
+                .close();
+
+            let path = Path::new()
+                .set("fill", "none")
+                .set("opacity", 0.3)
+                .set("stroke", "red")
+                .set("stroke-width", width)
+                .set("d", data);
+
+            document = document.add(path);
         }
+
+        let centroid = Polyline { points: clipped }.centroid();
+        let path = Circle::new()
+            .set("fill", "orange")
+            .set("opacity", 0.3)
+            .set("cx", centroid.x)
+            .set("cy", centroid.y)
+            .set("r", width);
+
+        document = document.add(path);
         break;
     }
 
