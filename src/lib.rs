@@ -1,4 +1,3 @@
-use rand::prelude::IndexedRandom;
 use rand::Rng;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -8,8 +7,10 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::Clamped;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
+use wilsons::wilsons;
 
 // mod fortunes;
+mod wilsons;
 
 struct MyImage {
     pixels: Vec<u8>,
@@ -230,59 +231,11 @@ pub fn generate(width: u32, height: u32, cell_size: u32) {
         }
     }
 
-    let mut unchosen_vertices = HashSet::new();
-    for vertex in graph.keys() {
-        unchosen_vertices.insert(vertex);
-    }
-
-    let mut chosen_vertices = HashSet::new();
-
-    let x = unchosen_vertices.clone().into_iter().collect::<Vec<_>>();
-    let chosen = x.choose(&mut rng).expect("there should really be one...");
-    chosen_vertices.insert(*chosen);
-    unchosen_vertices.remove(chosen);
-
-    let mut connections = HashSet::new();
-    loop {
-        // random walk (with loop erasure) from new point until we hit something in chosen_vertices
-        let mut path = Vec::new();
-        let x = unchosen_vertices.clone().into_iter().collect::<Vec<_>>();
-        let start = x.choose(&mut rng).expect("there should really be one...");
-
-        path.push(*start);
-        loop {
-            let start = path.last().expect("should not be empty...");
-            let candidates = graph
-                .get(start)
-                .expect("key should really exist...")
-                .clone()
-                .into_iter()
-                .collect::<Vec<_>>();
-            let next = candidates
-                .choose(&mut rng)
-                .expect("there should really be one...");
-            path.push(next);
-            if chosen_vertices.contains(next) {
-                break;
-            }
-        }
-        path = erase_loops(path);
-
-        for idx in 0..path.len() - 1 {
-            connections.insert((path[idx], path[idx + 1]));
-        }
-        for vertex in &path {
-            unchosen_vertices.remove(vertex);
-        }
-        chosen_vertices.extend(path.iter().cloned().collect::<HashSet<_>>());
-        if unchosen_vertices.is_empty() {
-            break;
-        }
-    }
+    let connections = wilsons(&graph);
     for (source, destinations) in graph.iter() {
         for destination in destinations {
-            if connections.contains(&(source, destination))
-                || connections.contains(&(destination, source))
+            if connections.contains(&(*source, **destination))
+                || connections.contains(&(**destination, *source))
             {
                 continue;
             }
@@ -319,26 +272,6 @@ fn render_to_canvas(image: &MyImage) {
         .unwrap();
     context.reset();
     context.put_image_data(&image_data_temp, 0.0, 0.0).unwrap();
-}
-
-fn erase_loops<T: std::cmp::PartialEq>(path: Vec<&T>) -> Vec<&T> {
-    let mut indices = Vec::new();
-    let mut idx = 0;
-    indices.push(idx);
-    while idx < path.len() - 1 {
-        for (pos, vertex) in path[idx..path.len() - 1].iter().enumerate().rev() {
-            if *vertex == path[idx] {
-                idx += pos + 1;
-                indices.push(idx);
-                break;
-            }
-        }
-    }
-    let mut loop_erased_path = Vec::new();
-    for idx in indices {
-        loop_erased_path.push(path[idx]);
-    }
-    return loop_erased_path;
 }
 
 struct PolyLine {

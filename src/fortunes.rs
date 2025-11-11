@@ -11,12 +11,16 @@ use svg::node::element::path::Data;
 use svg::node::element::Circle;
 use svg::node::element::Path;
 use svg::Document;
+use wilsons::wilsons;
 
 #[path = "geometry.rs"]
 mod geometry;
 
 #[path = "clipper.rs"]
 mod clipper;
+
+#[path = "wilsons.rs"]
+mod wilsons;
 
 #[derive(Debug)]
 struct Slot {
@@ -480,22 +484,20 @@ impl Beachline {
         let upper_site_id = self.get_site_id(&upper_arc_slot_id);
         let lower_separator_id = self.get_separator_id(&lower_edge_slot_id);
         let upper_separator_id = self.get_separator_id(&upper_edge_slot_id);
-        if !self.cell_separators.contains_key(&lower_site_id) {
-            self.cell_separators.insert(lower_site_id, HashSet::new());
-        }
-        let lower_cell_separators = self.cell_separators.get_mut(&lower_site_id).unwrap();
-        lower_cell_separators.insert(lower_separator_id);
-        if !self.cell_separators.contains_key(&target_site_id) {
-            self.cell_separators.insert(target_site_id, HashSet::new());
-        }
-        let target_cell_separators = self.cell_separators.get_mut(&target_site_id).unwrap();
+        self.cell_separators
+            .entry(lower_site_id)
+            .or_insert(HashSet::new())
+            .insert(lower_separator_id);
+        let target_cell_separators = self
+            .cell_separators
+            .entry(target_site_id)
+            .or_insert(HashSet::new());
         target_cell_separators.insert(lower_separator_id);
         target_cell_separators.insert(upper_separator_id);
-        if !self.cell_separators.contains_key(&upper_site_id) {
-            self.cell_separators.insert(upper_site_id, HashSet::new());
-        }
-        let upper_cell_separators = self.cell_separators.get_mut(&upper_site_id).unwrap();
-        upper_cell_separators.insert(upper_separator_id);
+        self.cell_separators
+            .entry(upper_site_id)
+            .or_insert(HashSet::new())
+            .insert(upper_separator_id);
 
         // wrap up
         let target_arc = self.get_arc(&target_arc_slot_id).unwrap();
@@ -807,7 +809,7 @@ fn add_sites(points: Vec<(f32, f32)>) -> Vec<Site> {
     return sites;
 }
 
-fn fortunes(sites: Vec<Site>, boundaries: &Polyline) -> Beachline {
+fn fortunes(sites: Vec<Site>, boundaries: &Polyline) -> (Beachline, HashSet<(u32, u32)>) {
     let mut events = BinaryHeap::new();
 
     for site in sites {
@@ -846,14 +848,11 @@ fn fortunes(sites: Vec<Site>, boundaries: &Polyline) -> Beachline {
                         .unwrap()
                         .focus
                         .id;
-                    if !beachline.cell_separators.contains_key(&lower_site_id) {
-                        beachline
-                            .cell_separators
-                            .insert(lower_site_id, HashSet::new());
-                    }
-                    let lower_cell_separators =
-                        beachline.cell_separators.get_mut(&lower_site_id).unwrap();
-                    lower_cell_separators.insert(separator_id);
+                    beachline
+                        .cell_separators
+                        .entry(lower_site_id)
+                        .or_insert(HashSet::new())
+                        .insert(separator_id);
                 }
                 if let Some(upper_arc_id) = beachline.get_upper_neighbor(edge_slot_id) {
                     let upper_site_id = beachline.nodes[&upper_arc_id]
@@ -862,14 +861,11 @@ fn fortunes(sites: Vec<Site>, boundaries: &Polyline) -> Beachline {
                         .unwrap()
                         .focus
                         .id;
-                    if !beachline.cell_separators.contains_key(&upper_site_id) {
-                        beachline
-                            .cell_separators
-                            .insert(upper_site_id, HashSet::new());
-                    }
-                    let upper_cell_separators =
-                        beachline.cell_separators.get_mut(&upper_site_id).unwrap();
-                    upper_cell_separators.insert(separator_id);
+                    beachline
+                        .cell_separators
+                        .entry(upper_site_id)
+                        .or_insert(HashSet::new())
+                        .insert(separator_id);
                 }
                 beachline.complete_edges.push((
                     edge.separator_id,
@@ -885,7 +881,34 @@ fn fortunes(sites: Vec<Site>, boundaries: &Polyline) -> Beachline {
         }
     }
 
-    return beachline;
+    let mut sites_by_separator = HashMap::new();
+    for (site, separators) in &beachline.cell_separators {
+        for separator in separators {
+            sites_by_separator
+                .entry(*separator)
+                .or_insert(HashSet::new())
+                .insert(*site);
+        }
+    }
+    println!("sites_by_separator: {:?}", sites_by_separator);
+    let mut graph = HashMap::new();
+    for sites in sites_by_separator.values() {
+        assert_eq!(sites.len(), 2);
+        let sites_vec: Vec<&u32> = sites.into_iter().collect();
+        graph
+            .entry(*sites_vec[0])
+            .or_insert(HashSet::new())
+            .insert(sites_vec[1]);
+        graph
+            .entry(*sites_vec[1])
+            .or_insert(HashSet::new())
+            .insert(sites_vec[0]);
+    }
+    println!("graph: {:?}", graph);
+    let connections = wilsons(&graph);
+    println!("connections: {:?}", connections);
+
+    return (beachline, connections);
 }
 
 fn get_path_from_points(start: &Point, end: &Point, color: &str, width: f32) -> Path {
@@ -902,7 +925,12 @@ fn get_path_from_points(start: &Point, end: &Point, color: &str, width: f32) -> 
         .set("d", data);
 }
 
-fn plot(beachline: &Beachline, boundaries: &Polyline, width: f32) {
+fn plot(
+    beachline: &Beachline,
+    boundaries: &Polyline,
+    connections: HashSet<(u32, u32)>,
+    width: f32,
+) {
     let mut document = Document::new().set("viewBox", (-2.5, -2.5, 5, 5));
 
     for idx in 0..boundaries.points.len() {
@@ -941,11 +969,10 @@ fn plot(beachline: &Beachline, boundaries: &Polyline, width: f32) {
 
     let mut edges_by_separator = HashMap::new();
     for (separator_id, segment) in &beachline.complete_edges {
-        if !edges_by_separator.contains_key(separator_id) {
-            edges_by_separator.insert(separator_id, vec![]);
-        }
-        let segments = edges_by_separator.get_mut(separator_id).unwrap();
-        segments.push(segment);
+        edges_by_separator
+            .entry(separator_id)
+            .or_insert(vec![])
+            .push(segment);
     }
     let mut site_by_id = HashMap::new();
     for site in &beachline.complete_sites {
@@ -1015,6 +1042,24 @@ fn plot(beachline: &Beachline, boundaries: &Polyline, width: f32) {
         break;
     }
 
+    for (first, second) in connections {
+        let start = site_by_id[&first].location;
+        let end = site_by_id[&second].location;
+        let data = Data::new()
+            .move_to((start.x, start.y))
+            .line_by((end.x - start.x, end.y - start.y))
+            .close();
+
+        let path = Path::new()
+            .set("fill", "none")
+            .set("opacity", 0.3)
+            .set("stroke", "gray")
+            .set("stroke-width", width)
+            .set("d", data);
+
+        document = document.add(path);
+    }
+
     for (_, segment) in &beachline.complete_edges {
         let path = get_path_from_points(&segment.first, &segment.second, "green", width);
         document = document.add(path);
@@ -1048,9 +1093,9 @@ fn run_fortunes(
         });
     }
 
-    let beachline = fortunes(sites, &boundaries);
+    let (beachline, connections) = fortunes(sites, &boundaries);
 
-    plot(&beachline, &boundaries, 0.05);
+    plot(&beachline, &boundaries, connections, 0.05);
 
     return beachline.complete_edges;
 }
