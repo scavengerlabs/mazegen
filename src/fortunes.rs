@@ -809,7 +809,10 @@ fn add_sites(points: Vec<(f32, f32)>) -> Vec<Site> {
     return sites;
 }
 
-fn fortunes(sites: Vec<Site>, boundaries: &Polyline) -> (Beachline, HashSet<(u32, u32)>) {
+fn fortunes(
+    sites: Vec<Site>,
+    boundaries: &Polyline,
+) -> (Beachline, HashSet<(u32, u32)>, HashMap<u32, HashSet<u32>>) {
     let mut events = BinaryHeap::new();
 
     for site in sites {
@@ -881,8 +884,43 @@ fn fortunes(sites: Vec<Site>, boundaries: &Polyline) -> (Beachline, HashSet<(u32
         }
     }
 
+    let mut edges_by_separator = HashMap::new();
+    for (separator_id, segment) in &beachline.complete_edges {
+        edges_by_separator
+            .entry(separator_id)
+            .or_insert(vec![])
+            .push(segment);
+    }
+    let mut site_by_id = HashMap::new();
+    for site in &beachline.complete_sites {
+        site_by_id.insert(site.id, *site);
+    }
+    for (_, node) in &beachline.nodes {
+        if let Node::Arc(arc) = node.value {
+            site_by_id.insert(arc.focus.id, arc.focus);
+        }
+    }
+    let mut separators_by_site = HashMap::new();
+    for (site_id, separator_ids) in &beachline.cell_separators {
+        let site = site_by_id[site_id];
+        let mut lines = vec![];
+        for separator_id in separator_ids {
+            // get line from first segment (they're colinear)
+            lines.push((*separator_id, edges_by_separator[separator_id][0].to_line()));
+        }
+        let clipped = clip(boundaries, &lines, &site.location);
+        for (_, separators) in &clipped {
+            for separator in separators {
+                separators_by_site
+                    .entry(*site_id)
+                    .or_insert(HashSet::new())
+                    .insert(separator.clone());
+            }
+        }
+    }
+
     let mut sites_by_separator = HashMap::new();
-    for (site, separators) in &beachline.cell_separators {
+    for (site, separators) in &separators_by_site {
         for separator in separators {
             sites_by_separator
                 .entry(*separator)
@@ -890,7 +928,6 @@ fn fortunes(sites: Vec<Site>, boundaries: &Polyline) -> (Beachline, HashSet<(u32
                 .insert(*site);
         }
     }
-    println!("sites_by_separator: {:?}", sites_by_separator);
     let mut graph = HashMap::new();
     for sites in sites_by_separator.values() {
         assert_eq!(sites.len(), 2);
@@ -904,11 +941,9 @@ fn fortunes(sites: Vec<Site>, boundaries: &Polyline) -> (Beachline, HashSet<(u32
             .or_insert(HashSet::new())
             .insert(sites_vec[0]);
     }
-    println!("graph: {:?}", graph);
     let connections = wilsons(&graph);
-    println!("connections: {:?}", connections);
 
-    return (beachline, connections);
+    return (beachline, connections, sites_by_separator);
 }
 
 fn get_path_from_points(start: &Point, end: &Point, color: &str, width: f32) -> Path {
@@ -928,6 +963,7 @@ fn get_path_from_points(start: &Point, end: &Point, color: &str, width: f32) -> 
 fn plot(
     beachline: &Beachline,
     boundaries: &Polyline,
+    sites_by_separator: HashMap<u32, HashSet<u32>>,
     connections: HashSet<(u32, u32)>,
     width: f32,
 ) {
@@ -944,27 +980,11 @@ fn plot(
         let path = Path::new()
             .set("fill", "none")
             .set("opacity", 0.3)
-            .set("stroke", "black")
+            .set("stroke", "purple")
             .set("stroke-width", width)
             .set("d", data);
 
         document = document.add(path);
-    }
-
-    for node in beachline.nodes.values() {
-        match node.value {
-            Node::Arc(arc) => {
-                let path = Circle::new()
-                    .set("fill", "black")
-                    .set("opacity", 0.3)
-                    .set("cx", arc.focus.location.x)
-                    .set("cy", arc.focus.location.y)
-                    .set("r", width);
-
-                document = document.add(path);
-            }
-            Node::Edge(_) => {}
-        }
     }
 
     let mut edges_by_separator = HashMap::new();
@@ -983,24 +1003,47 @@ fn plot(
             site_by_id.insert(arc.focus.id, arc.focus);
         }
     }
+
+    for site in site_by_id.values() {
+        let path = Circle::new()
+            .set("fill", "black")
+            .set("opacity", 0.3)
+            .set("cx", site.location.x)
+            .set("cy", site.location.y)
+            .set("r", width);
+
+        document = document.add(path);
+    }
+
+    // let mut separators_by_site = HashMap::new();
     for (site_id, separator_ids) in &beachline.cell_separators {
-        println!("separator_ids: {:?}", separator_ids);
         let site = site_by_id[site_id];
         let mut lines = vec![];
         for separator_id in separator_ids {
             // get line from first segment (they're colinear)
-            lines.push(edges_by_separator[separator_id][0].to_line());
-            for segment in &edges_by_separator[separator_id] {
-                let path = get_path_from_points(&segment.first, &segment.second, "red", width);
-                document = document.add(path);
-            }
+            lines.push((*separator_id, edges_by_separator[separator_id][0].to_line()));
         }
         let clipped = clip(boundaries, &lines, &site.location);
         println!("clipped: {:?}", clipped);
 
         for idx in 0..clipped.len() {
-            let start = clipped[idx];
-            let end = clipped[(idx + 1) % clipped.len()];
+            let (start, start_separators) = &clipped[idx];
+            let (end, end_separators) = &clipped[(idx + 1) % clipped.len()];
+            let both_separators: Vec<u32> = start_separators
+                .intersection(end_separators)
+                .copied()
+                .collect();
+            if !both_separators.is_empty() {
+                assert_eq!(both_separators.len(), 1);
+                let separator_id = both_separators[0];
+                let sites: Vec<u32> = sites_by_separator[&separator_id].iter().copied().collect();
+                if connections.contains(&(sites[0], sites[1]))
+                    || connections.contains(&(sites[1], sites[0]))
+                {
+                    // don't draw this separator
+                    continue;
+                }
+            }
             let data = Data::new()
                 .move_to((start.x, start.y))
                 .line_by((end.x - start.x, end.y - start.y))
@@ -1014,23 +1057,16 @@ fn plot(
                 .set("d", data);
 
             document = document.add(path);
-
-            let data = Data::new()
-                .move_to((start.x, start.y))
-                .line_by(((end.x - start.x) * 0.1, (end.y - start.y) * 0.1))
-                .close();
-
-            let path = Path::new()
-                .set("fill", "none")
-                .set("opacity", 0.3)
-                .set("stroke", "red")
-                .set("stroke-width", width)
-                .set("d", data);
-
-            document = document.add(path);
+        }
+        let mut clipped_points = vec![];
+        for (point, _) in &clipped {
+            clipped_points.push(*point);
         }
 
-        let centroid = Polyline { points: clipped }.centroid();
+        let centroid = Polyline {
+            points: clipped_points,
+        }
+        .centroid();
         let path = Circle::new()
             .set("fill", "orange")
             .set("opacity", 0.3)
@@ -1039,7 +1075,7 @@ fn plot(
             .set("r", width);
 
         document = document.add(path);
-        break;
+        // break;
     }
 
     for (first, second) in connections {
@@ -1056,22 +1092,6 @@ fn plot(
             .set("stroke", "gray")
             .set("stroke-width", width)
             .set("d", data);
-
-        document = document.add(path);
-    }
-
-    for (_, segment) in &beachline.complete_edges {
-        let path = get_path_from_points(&segment.first, &segment.second, "green", width);
-        document = document.add(path);
-    }
-
-    for site in &beachline.complete_sites {
-        let path = Circle::new()
-            .set("fill", "blue")
-            .set("opacity", 0.3)
-            .set("cx", site.location.x)
-            .set("cy", site.location.y)
-            .set("r", width);
 
         document = document.add(path);
     }
@@ -1093,9 +1113,15 @@ fn run_fortunes(
         });
     }
 
-    let (beachline, connections) = fortunes(sites, &boundaries);
+    let (beachline, connections, sites_by_separator) = fortunes(sites, &boundaries);
 
-    plot(&beachline, &boundaries, connections, 0.05);
+    plot(
+        &beachline,
+        &boundaries,
+        sites_by_separator,
+        connections,
+        0.05,
+    );
 
     return beachline.complete_edges;
 }

@@ -1,14 +1,22 @@
 use super::geometry::{Direction, Line, LineSegment, Point, Polyline, Ray};
+use std::collections::HashSet;
 
-pub fn clip(subject: &Polyline, clip_edges: &Vec<Line>, site: &Point) -> Vec<Point> {
+pub fn clip(
+    subject: &Polyline,
+    clip_edges: &Vec<(u32, Line)>,
+    site: &Point,
+) -> Vec<(Point, HashSet<u32>)> {
     // subject is closed (end connects to beginning)
     // assume that clip is convex
     // clip may not be closed
     // site is inside the clip (semi-)polygon
 
-    let mut outputs = subject.points.clone();
+    let mut outputs: Vec<(Point, HashSet<u32>)> = vec![];
+    for point in &subject.points {
+        outputs.push((*point, HashSet::new()));
+    }
 
-    for line in clip_edges {
+    for (separator_id, line) in clip_edges {
         let inputs = outputs.clone();
         outputs.clear();
         let normal_direction = Direction {
@@ -23,20 +31,25 @@ pub fn clip(subject: &Polyline, clip_edges: &Vec<Line>, site: &Point) -> Vec<Poi
             normal = -normal;
         }
         for idx in 0..inputs.len() {
-            let next = inputs[(idx + 1) % inputs.len()];
-            let current = inputs[idx];
+            let (next, next_separator_ids) = &inputs[(idx + 1) % inputs.len()];
+            let (current, current_separator_ids) = &inputs[idx];
             let segment = LineSegment {
-                first: next,
-                second: current,
+                first: *next,
+                second: *current,
             };
             match segment.intersection_with_line(line) {
                 Some(intersection) => {
-                    outputs.push(intersection);
+                    let mut separator_ids = HashSet::new();
+                    for id in next_separator_ids.intersection(&current_separator_ids) {
+                        separator_ids.insert(*id);
+                    }
+                    separator_ids.insert(*separator_id);
+                    outputs.push((intersection, separator_ids));
                 }
                 None => {}
             }
             if normal.project(&next) >= 0.0 {
-                outputs.push(next);
+                outputs.push((*next, next_separator_ids.clone()));
             }
         }
     }
@@ -57,10 +70,13 @@ mod tests {
                 Point { x: -1.0, y: 1.0 },
             ],
         };
-        let clip_edges = vec![Line {
-            start: Point { x: 0.0, y: 0.0 },
-            direction: Direction::new(1.0, 0.0),
-        }];
+        let clip_edges = vec![(
+            0,
+            Line {
+                start: Point { x: 0.0, y: 0.0 },
+                direction: Direction::new(1.0, 0.0),
+            },
+        )];
         let site = Point { x: 0.0, y: -1.0 };
 
         let points = clip(&subject, &clip_edges, &site);
@@ -72,7 +88,7 @@ mod tests {
             Point { x: -1.0, y: -1.0 },
         ];
         println!("points: {:?}", points);
-        for (point, expected_point) in points.iter().zip(expected_points.iter()) {
+        for ((point, _), expected_point) in points.iter().zip(expected_points.iter()) {
             assert!(point.close_to(expected_point, 0.001));
         }
     }
