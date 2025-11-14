@@ -1,3 +1,4 @@
+use core::num;
 use std::fmt;
 use std::ops::Neg;
 
@@ -115,6 +116,27 @@ pub struct Polyline {
 impl Polyline {
     pub fn new() -> Self {
         return Polyline { points: vec![] };
+    }
+
+    pub fn contains(&self, point: &Point) -> bool {
+        let ray = Ray {
+            start: *point,
+            direction: Direction::new(1.0, 0.0),
+        };
+        let mut num_intersections = 0;
+        for idx in 0..self.points.len() {
+            let line_segment = LineSegment {
+                first: self.points[idx],
+                second: self.points[(idx + 1) % self.points.len()],
+            };
+            match line_segment.intersection(ray) {
+                Some(point) => {
+                    num_intersections += 1;
+                }
+                None => {}
+            }
+        }
+        return (num_intersections % 2) == 1;
     }
 
     pub fn area(&self) -> f32 {

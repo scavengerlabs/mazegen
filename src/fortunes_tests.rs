@@ -56,7 +56,7 @@ fn test_fortunes_split_arc_being_squeezed() {
         ((-0.41, -0.43), (2.00, -0.54)),
     ];
 
-    let edges = run_fortunes(sites, boundary_polyline);
+    let edges = run_mazer(sites, boundary_polyline, 0.05);
     println!("edges: {:?}", edges);
     let expected = get_expectation(expected_edges);
     check_line_segments_close(edges, expected);
@@ -85,7 +85,7 @@ fn test_fortunes_fail_bug_8() {
         ((0.33, -0.88), (2.00, 0.13)),
     ];
 
-    let edges = run_fortunes(sites, boundary_polyline);
+    let edges = run_mazer(sites, boundary_polyline, 0.05);
     let expected = get_expectation(expected_edges);
     check_line_segments_close(edges, expected);
 }
@@ -112,7 +112,7 @@ fn test_fortunes_fail_bug_7() {
         ((-0.12, 0.20), (2.09, 0.45)),
     ];
 
-    let edges = run_fortunes(sites, boundary_polyline);
+    let edges = run_mazer(sites, boundary_polyline, 0.05);
     let expected = get_expectation(expected_edges);
     check_line_segments_close(edges, expected);
 }
@@ -140,7 +140,7 @@ fn test_fortunes_fail_bug_6() {
         ((0.43, 0.22), (2.00, -0.35)),
     ];
 
-    let edges = run_fortunes(sites, boundary_polyline);
+    let edges = run_mazer(sites, boundary_polyline, 0.05);
     let expected = get_expectation(expected_edges);
     check_line_segments_close(edges, expected);
 }
@@ -160,7 +160,7 @@ fn test_fortunes_fail_bug_5() {
         ((1.33, 0.76), (2.00, 1.06)),
     ];
 
-    let edges = run_fortunes(sites, boundary_polyline);
+    let edges = run_mazer(sites, boundary_polyline, 0.05);
     let expected = get_expectation(expected_edges);
     check_line_segments_close(edges, expected);
 }
@@ -179,7 +179,7 @@ fn test_fortunes_fail_bug_4() {
         ((0.01, -1.94), (-0.02, -2.00)),
     ];
 
-    let edges = run_fortunes(sites, boundary_polyline);
+    let edges = run_mazer(sites, boundary_polyline, 0.05);
     let expected = get_expectation(expected_edges);
     check_line_segments_close(edges, expected);
 }
@@ -199,7 +199,7 @@ fn test_fortunes_fail_bug_3() {
         ((-0.15, -0.43), (-1.57, -2.00)),
     ];
 
-    let edges = run_fortunes(sites, boundary_polyline);
+    let edges = run_mazer(sites, boundary_polyline, 0.05);
     let expected = get_expectation(expected_edges);
     check_line_segments_close(edges, expected);
 }
@@ -226,7 +226,7 @@ fn test_fortunes_fail_bug_2() {
         ((0.11, 1.50), (0.32, 2.00)),
     ];
 
-    let edges = run_fortunes(sites, boundary_polyline);
+    let edges = run_mazer(sites, boundary_polyline, 0.05);
     let expected = get_expectation(expected_edges);
     check_line_segments_close(edges, expected);
 }
@@ -243,7 +243,7 @@ fn test_fortunes_fail_bug_1() {
         ((0.26, -0.58), (2.00, -0.62)),
     ];
 
-    let edges = run_fortunes(sites, boundary_polyline);
+    let edges = run_mazer(sites, boundary_polyline, 0.05);
     let expected = get_expectation(expected_edges);
     check_line_segments_close(edges, expected);
 }
@@ -260,7 +260,7 @@ fn test_fortunes_edge_bug_1() {
         ((-0.08, 1.56), (-0.12, 2.00)),
     ];
 
-    let edges = run_fortunes(sites, boundary_polyline);
+    let edges = run_mazer(sites, boundary_polyline, 0.05);
     let expected = get_expectation(expected_edges);
     check_line_segments_close(edges, expected);
 }
@@ -277,7 +277,7 @@ fn test_fortunes_edge_bug_2() {
         ((0.44, 0.78), (2.00, 1.00)),
     ];
 
-    let edges = run_fortunes(sites, boundary_polyline);
+    let edges = run_mazer(sites, boundary_polyline, 0.05);
     let expected = get_expectation(expected_edges);
     check_line_segments_close(edges, expected);
 }
@@ -293,7 +293,7 @@ fn test_fortunes_x_line() {
         ((1.50, 0.00), (1.50, -2.00)),
     ];
 
-    let edges = run_fortunes(sites, boundary_polyline);
+    let edges = run_mazer(sites, boundary_polyline, 0.05);
     let expected = get_expectation(expected_edges);
     check_line_segments_close(edges, expected);
 }
@@ -310,7 +310,7 @@ fn test_fortunes_right_opening_v() {
         ((1.00, -0.00), (2.00, 0.00)),
     ];
 
-    let edges = run_fortunes(sites, boundary_polyline);
+    let edges = run_mazer(sites, boundary_polyline, 0.05);
     let expected = get_expectation(expected_edges);
     check_line_segments_close(edges, expected);
 }
