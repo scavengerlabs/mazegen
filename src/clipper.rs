@@ -45,6 +45,15 @@ pub fn clip(
                     }
                     separator_ids.insert(*separator_id);
                     outputs.push((intersection, separator_ids));
+                    if outputs.len() >= 2
+                        && outputs[outputs.len() - 1].1.len() == 2
+                        && outputs[outputs.len() - 1].1 == outputs[outputs.len() - 2].1
+                    {
+                        // The last two points are identical - they have the same two separators.
+                        // Remove both.
+                        outputs.pop();
+                        outputs.pop();
+                    }
                 }
                 None => {}
             }
@@ -129,7 +138,96 @@ mod tests {
             Point { x: 2.0, y: 0.0 },
             Point { x: 0.0, y: 0.0 },
         ];
-        println!("points: {:?}", points);
+        for ((point, _), expected_point) in points.iter().zip(expected_points.iter()) {
+            assert!(point.close_to(expected_point, 0.001));
+        }
+    }
+
+    #[test]
+    fn test_clip_split() {
+        let subject = Polyline {
+            points: vec![
+                Point { x: 0.0, y: 0.0 },
+                Point { x: 0.0, y: 2.0 },
+                Point { x: 1.0, y: 2.0 },
+                Point { x: 1.0, y: 1.0 },
+                Point { x: 2.0, y: 1.0 },
+                Point { x: 2.0, y: 0.0 },
+            ],
+        };
+        let clip_edges = vec![
+            (
+                0,
+                Line {
+                    start: Point { x: 0.75, y: 1.75 },
+                    direction: Direction::new(1.0, -1.0),
+                },
+            ),
+            (
+                1,
+                Line {
+                    start: Point { x: 1.5, y: 2.5 },
+                    direction: Direction::new(1.0, -1.0),
+                },
+            ),
+        ];
+        let site = Point { x: 1.0, y: 2.0 };
+
+        let points = clip(&subject, &clip_edges, &site);
+
+        let expected_points = vec![
+            Point { x: 1.0, y: 2.0 },
+            Point { x: 1.0, y: 1.5 },
+            Point {
+                x: 1.5,
+                y: 0.99999994,
+            },
+            Point { x: 2.0, y: 1.0 },
+            Point { x: 2.0, y: 0.5 },
+            Point { x: 0.5, y: 2.0 },
+        ];
+        for ((point, _), expected_point) in points.iter().zip(expected_points.iter()) {
+            assert!(point.close_to(expected_point, 0.001));
+        }
+    }
+
+    #[test]
+    fn test_clip_dangler() {
+        let subject = Polyline {
+            points: vec![
+                Point { x: 0.0, y: 0.0 },
+                Point { x: 0.0, y: 2.0 },
+                Point { x: 1.0, y: 2.0 },
+                Point { x: 1.0, y: 1.0 },
+                Point { x: 2.0, y: 1.0 },
+                Point { x: 2.0, y: 0.0 },
+            ],
+        };
+        let clip_edges = vec![
+            (
+                0,
+                Line {
+                    start: Point { x: 0.75, y: 1.75 },
+                    direction: Direction::new(1.0, -1.0),
+                },
+            ),
+            (
+                1,
+                Line {
+                    start: Point { x: 0.0, y: 0.0 },
+                    direction: Direction::new(1.0, 1.0),
+                },
+            ),
+        ];
+        let site = Point { x: 1.0, y: 2.0 };
+
+        let points = clip(&subject, &clip_edges, &site);
+
+        let expected_points = vec![
+            Point { x: 1.0, y: 2.0 },
+            Point { x: 1.0, y: 1.5 },
+            Point { x: 0.5, y: 2.0 },
+        ];
         for ((point, _), expected_point) in points.iter().zip(expected_points.iter()) {
             assert!(point.close_to(expected_point, 0.001));
         }
