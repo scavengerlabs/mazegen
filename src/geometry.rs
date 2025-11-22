@@ -333,7 +333,7 @@ impl Ray {
 
     // Returns true if the point is "in front" of the ray
     pub fn in_front(&self, point: &Point) -> bool {
-        return self.direction.project(point) > self.direction.project(&self.start);
+        return self.project(point) >= 0.0;
     }
 }
 
