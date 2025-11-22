@@ -61,6 +61,15 @@ pub fn clip(
                 outputs.push((*next, next_separator_ids.clone()));
             }
         }
+        if outputs.len() >= 2
+            && outputs[0].1.len() == 2
+            && outputs[0].1 == outputs[outputs.len() - 1].1
+        {
+            // The first and last points are identical - they have the same two separators.
+            // Remove both.
+            outputs.remove(0);
+            outputs.pop();
+        }
     }
     return outputs;
 }
@@ -227,6 +236,48 @@ mod tests {
             Point { x: 1.0, y: 2.0 },
             Point { x: 1.0, y: 1.5 },
             Point { x: 0.5, y: 2.0 },
+        ];
+        for ((point, _), expected_point) in points.iter().zip(expected_points.iter()) {
+            assert!(point.close_to(expected_point, 0.001));
+        }
+    }
+
+    #[test]
+    fn test_clip_end_dangler() {
+        let subject = Polyline {
+            points: vec![
+                Point { x: 2.0, y: 1.0 },
+                Point { x: 2.0, y: 0.0 },
+                Point { x: 0.0, y: 0.0 },
+                Point { x: 0.0, y: 2.0 },
+                Point { x: 1.0, y: 2.0 },
+                Point { x: 1.0, y: 1.0 },
+            ],
+        };
+        let clip_edges = vec![
+            (
+                0,
+                Line {
+                    start: Point { x: 0.75, y: 1.75 },
+                    direction: Direction::new(1.0, -1.0),
+                },
+            ),
+            (
+                1,
+                Line {
+                    start: Point { x: 0.0, y: 0.0 },
+                    direction: Direction::new(1.0, 1.0),
+                },
+            ),
+        ];
+        let site = Point { x: 1.0, y: 2.0 };
+
+        let points = clip(&subject, &clip_edges, &site);
+
+        let expected_points = vec![
+            Point { x: 0.5, y: 2.0 },
+            Point { x: 1.0, y: 2.0 },
+            Point { x: 1.0, y: 1.5 },
         ];
         for ((point, _), expected_point) in points.iter().zip(expected_points.iter()) {
             assert!(point.close_to(expected_point, 0.001));
