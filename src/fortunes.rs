@@ -383,9 +383,6 @@ impl Beachline {
 
     // each edge corresponds to a y value where two arcs collide
     pub fn remove_arc(&mut self, target_arc_slot_id: u32, directrix: f32) -> Vec<u32> {
-        if !self.nodes.contains_key(&target_arc_slot_id) {
-            return vec![];
-        }
         // for a circle event, edges should exist on both sides
         let lower_edge_slot_id = self.get_lower_neighbor(target_arc_slot_id).unwrap();
         let upper_edge_slot_id = self.get_upper_neighbor(target_arc_slot_id).unwrap();
@@ -397,7 +394,14 @@ impl Beachline {
         let upper_site = self.get_arc(&upper_arc_slot_id).unwrap().focus.location;
         let lower_edge = &lower_edge_slot.value.get_edge().unwrap();
         let upper_edge = &upper_edge_slot.value.get_edge().unwrap();
-        let new_start = lower_edge.ray.intersection(upper_edge.ray).unwrap();
+        let new_start = match lower_edge.ray.intersection(upper_edge.ray) {
+            Some(value) => value,
+            None => {
+                println!("lower_edge.ray: {:?}", lower_edge.ray);
+                println!("upper_edge.ray: {:?}", upper_edge.ray);
+                panic!("No intersection!");
+            }
+        };
         let mut new_direction = lower_site.perpendicular(&upper_site);
         let normal = lower_site.to_parabola(directrix).normal(&new_start);
         let projection = normal.project(&Point {
@@ -682,7 +686,15 @@ impl Beachline {
             .get_arc()
             .unwrap();
         let edge = edge_slot.value.get_edge().unwrap();
-        return lower_arc.intersection(&edge.ray, directrix).unwrap().y;
+        return match lower_arc.intersection(&edge.ray, directrix) {
+            Some(point) => point.y,
+            None => {
+                // println!("lower_arc: {:?}", lower_arc);
+                // println!("directrix: {:?}", directrix);
+                // println!("edge.ray: {:?}", edge.ray);
+                panic!("no intersection!");
+            }
+        };
     }
 
     pub fn get_slot_id_at(&self, slot: &Slot, site: &Point) -> u32 {
@@ -703,14 +715,17 @@ impl Beachline {
         let mut events = vec![];
         let arc_slot_ids = self.add_site(&site);
         for arc_slot_id in arc_slot_ids {
-            let circle_event = self.check_for_circle_events(arc_slot_id);
-            // println!("adding circle event: {:?}", circle_event);
-            match circle_event {
+            let event_location = self.check_for_circle_events(arc_slot_id);
+            match event_location {
                 Some(directrix) => {
-                    events.push(Event::Circle(CircleEvent {
+                    let new_circle_event = Event::Circle(CircleEvent {
                         arc_slot_id: arc_slot_id,
                         directrix: directrix,
-                    }));
+                        lower_edge_id: self.get_lower_neighbor(arc_slot_id).unwrap(),
+                        upper_edge_id: self.get_upper_neighbor(arc_slot_id).unwrap(),
+                    });
+                    // println!("adding circle event: {:?}", new_circle_event);
+                    events.push(new_circle_event);
                 }
                 None => {}
             }
@@ -719,18 +734,28 @@ impl Beachline {
     }
 
     pub fn handle_circle_event(&mut self, circle_event: CircleEvent) -> Vec<Event> {
-        // println!("handling circle event");
+        if !(self.nodes.contains_key(&circle_event.lower_edge_id)
+            && self.nodes.contains_key(&circle_event.upper_edge_id))
+        {
+            // The edges involved in this event are not all still here.
+            // They may have been eliminated by an earlier circle event.
+            return vec![];
+        }
+        // println!("handling circle event: {:?}", circle_event);
         let mut events = vec![];
         let arc_slot_ids = self.remove_arc(circle_event.arc_slot_id, circle_event.directrix);
         for arc_slot_id in arc_slot_ids {
-            let circle_event = self.check_for_circle_events(arc_slot_id);
-            // println!("adding circle event: {:?}", circle_event);
-            match circle_event {
+            let event_location = self.check_for_circle_events(arc_slot_id);
+            match event_location {
                 Some(directrix) => {
-                    events.push(Event::Circle(CircleEvent {
+                    let new_circle_event = Event::Circle(CircleEvent {
                         arc_slot_id: arc_slot_id,
                         directrix: directrix,
-                    }));
+                        lower_edge_id: self.get_lower_neighbor(arc_slot_id).unwrap(),
+                        upper_edge_id: self.get_upper_neighbor(arc_slot_id).unwrap(),
+                    });
+                    // println!("adding circle event: {:?}", new_circle_event);
+                    events.push(new_circle_event);
                 }
                 None => {}
             }
@@ -743,6 +768,8 @@ impl Beachline {
 struct CircleEvent {
     arc_slot_id: u32,
     directrix: f32,
+    lower_edge_id: u32,
+    upper_edge_id: u32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -941,7 +968,10 @@ fn mazer(
 
     let mut graph = HashMap::new();
     for (separator_id, sites) in &sites_by_separator {
-        assert_eq!(sites.len(), 2);
+        if sites.len() != 2 {
+            // println!("sites: {:?}", sites);
+            panic!("wrong number of sites per separator");
+        }
         let separator = &separators[separator_id];
         if separator.length() < 0.5 * average_length {
             // don't allow removing separators that are very short
@@ -1053,10 +1083,15 @@ fn get_separators(beachline: &Beachline, boundaries: &Polyline) -> HashMap<u32, 
                 .intersection(end_separators)
                 .copied()
                 .collect();
-            // println!("start_separators: {:?}", start_separators);
-            // println!("end_separators: {:?}", end_separators);
             if !both_separators.is_empty() {
-                assert_eq!(both_separators.len(), 1);
+                if both_separators.len() != 1 {
+                    // println!("cell: {:?}", cell);
+                    // println!("start: {:?}", start);
+                    // println!("end: {:?}", end);
+                    // println!("start_separators: {:?}", start_separators);
+                    // println!("end_separators: {:?}", end_separators);
+                    panic!("Wrong number of separators!");
+                }
                 let separator_id = both_separators[0];
                 separators.insert(
                     separator_id,

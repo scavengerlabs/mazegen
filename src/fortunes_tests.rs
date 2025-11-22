@@ -314,3 +314,21 @@ fn test_fortunes_right_opening_v() {
     let expected = get_expectation(expected_edges);
     check_line_segments_close(edges, expected);
 }
+
+#[test]
+fn test_fortunes_circle_event_preempted() {
+    let boundary_polyline = vec![(-2.0, -2.0), (-2.0, 2.0), (2.0, 2.0), (2.0, -2.0)];
+    let sites = vec![(0.0, 0.0), (0.1, -1.0), (0.11, 1.0), (0.2, 1.349902)];
+    let expected_edges = vec![
+        ((-4.95, -1.00), (4.81, -0.02)),
+        ((-4.49, 1.00), (4.81, -0.02)),
+        ((-0.53, 1.35), (4.81, -0.02)),
+        ((-0.53, 1.35), (-2.00, 1.73)),
+        ((4.81, -0.02), (4.81, -0.02)),
+    ];
+
+    let edges = run_mazer(sites, boundary_polyline, 0.05);
+    println!("edges: {:?}", edges);
+    let expected = get_expectation(expected_edges);
+    check_line_segments_close(edges, expected);
+}
